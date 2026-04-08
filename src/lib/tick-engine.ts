@@ -128,7 +128,7 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
         if (stage === "SELLING_PUTS") {
           switch (regime.regime) {
             case MarketRegime.NORMAL:
-              await execNakedPut(symbol, cycleId, cashAvailable, account.equity, ticker.strikePreference as string, log, logDb);
+              await execNakedPut(symbol, cycleId, cashAvailable, account.equity, ticker.strikePreference as string, Number(ticker.allocation) || 0, log, logDb);
               break;
 
             case MarketRegime.CAUTIOUS:
@@ -209,12 +209,13 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
 // ── Trade Execution Helpers ──────────────────────────────
 
 async function execNakedPut(
-  symbol: string, cycleId: string, cashAvailable: number, equity: number, strikePreference: string,
+  symbol: string, cycleId: string, cashAvailable: number, equity: number, strikePreference: string, allocation: number,
   log: (msg: string) => void, logDb: (level: string, msg: string, ticker?: string, data?: Record<string, unknown>) => Promise<void>
 ) {
   const put = await findBestPut(symbol, strikePreference);
   if (!put) { log(`${symbol}: No put found`); return; }
-  if (cashAvailable < put.strikePrice * 100) { log(`${symbol}: Not enough cash`); return; }
+  const positionSize = put.strikePrice * 100;
+  if (cashAvailable < positionSize) { log(`${symbol}: Not enough cash`); return; }
   const q = await getOptionQuote(put.symbol);
   const premium = q.midPrice * 100;
   if (premium <= 0) { log(`${symbol}: No premium`); return; }
@@ -222,8 +223,21 @@ async function execNakedPut(
   const premCheck = await checkPremiumRichness(premium, put.strikePrice);
   if (!premCheck.allowed) { log(`${symbol}: GUARD — ${premCheck.reason}`); await logDb("WARN", premCheck.reason!, symbol); return; }
 
-  const riskCheck = await checkRiskCap(put.strikePrice, equity, cashAvailable - put.strikePrice * 100);
-  if (!riskCheck.allowed) { log(`${symbol}: GUARD — ${riskCheck.reason}`); await logDb("WARN", riskCheck.reason!, symbol); return; }
+  // Per-ticker allocation overrides global risk cap
+  if (allocation > 0 && positionSize <= allocation) {
+    // Allocation set and position fits — skip global cap, just check cash floor
+    const minCashPct = await getConfigNum("min_cash_pct", 0.30);
+    const minCash = equity * minCashPct;
+    if (cashAvailable - positionSize < minCash) {
+      log(`${symbol}: GUARD — Cash after trade $${(cashAvailable - positionSize).toFixed(0)} below ${(minCashPct * 100).toFixed(0)}% floor ($${minCash.toFixed(0)})`);
+      await logDb("WARN", `Cash floor guard: $${(cashAvailable - positionSize).toFixed(0)} < $${minCash.toFixed(0)}`, symbol);
+      return;
+    }
+  } else {
+    // No allocation or position exceeds allocation — use global risk cap
+    const riskCheck = await checkRiskCap(put.strikePrice, equity, cashAvailable - positionSize);
+    if (!riskCheck.allowed) { log(`${symbol}: GUARD — ${riskCheck.reason}`); await logDb("WARN", riskCheck.reason!, symbol); return; }
+  }
 
   log(`${symbol}: SELL PUT ${put.symbol} $${put.strikePrice} prem=$${premium.toFixed(2)}`);
   const order = await submitOptionOrder({ symbol: put.symbol, qty: 1, side: "sell", type: "market", time_in_force: "day" });
