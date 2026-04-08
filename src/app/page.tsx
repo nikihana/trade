@@ -3,6 +3,7 @@
 import { PortfolioCard } from "./components/PortfolioCard";
 import { TickerCard } from "./components/TickerCard";
 import { AddTickerDialog } from "./components/AddTickerDialog";
+import { RunTickButton } from "./components/RunTickButton";
 import { useTickers } from "@/lib/hooks";
 
 export default function Home() {
@@ -67,8 +68,9 @@ export default function Home() {
           </div>
         )}
 
-        <div className="mt-4">
+        <div className="mt-4 space-y-3">
           <AddTickerDialog />
+          <RunTickButton />
         </div>
       </section>
     </div>
