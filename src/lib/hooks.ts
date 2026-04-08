@@ -59,6 +59,11 @@ export function useTickerPositions(symbol: string) {
   );
 }
 
+export function useCandidates() {
+  const ms = useRefreshMs();
+  return useSWR("/api/candidates", fetcher, { refreshInterval: ms * 4 });
+}
+
 export function useOptionsChain(
   symbol: string,
   params?: Record<string, string>
