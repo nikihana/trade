@@ -5,6 +5,7 @@ import { detectRegime } from "./regime";
 import { getScreeningUniverse } from "./universe";
 import { fetchEarningsDate, daysUntilEarnings } from "./earnings";
 import { getConfigNum } from "./config";
+import { checkPremiumRichness, checkRiskCap } from "./guards";
 import { MarketRegime } from "./types";
 import { format, differenceInDays } from "date-fns";
 
@@ -176,6 +177,10 @@ async function deepScreenTicker(
     const quote = await getOptionQuote(best.symbol);
     if (quote.midPrice <= 0) return null;
     const premium = quote.midPrice * 100;
+
+    // Filter: premium richness (same guard as tick engine)
+    const premCheck = await checkPremiumRichness(premium, best.strikePrice);
+    if (!premCheck.allowed) return null;
 
     // Filter: earnings check (no earnings within 35 days)
     const earningsDate = await fetchEarningsDate(symbol);
