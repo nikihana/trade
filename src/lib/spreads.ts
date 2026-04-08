@@ -167,8 +167,8 @@ export async function submitSpreadOrder(
         position_intent: "buy_to_open",
       },
     ],
-    type: "market",
-    time_in_force: "day",
+    type: "limit",
+    time_in_force: "gtc",
   });
 }
 
@@ -213,8 +213,9 @@ export async function buySpyPutHedge(
     symbol: best.symbol,
     qty: 1,
     side: "buy",
-    type: "market",
-    time_in_force: "day",
+    type: "limit",
+    time_in_force: "gtc",
+    limit_price: q.askPrice > 0 ? q.askPrice : q.midPrice,
   });
 
   return { contract: best, premium };

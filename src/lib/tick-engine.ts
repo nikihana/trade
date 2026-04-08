@@ -57,7 +57,7 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
               log(`${symbol}: ${stopLoss.reason}`);
               const q = await getOptionQuote(contract.symbol as string);
               const closeCost = q.midPrice * 100;
-              await submitOptionOrder({ symbol: contract.symbol as string, qty: 1, side: "buy", type: "market", time_in_force: "day" });
+              await submitOptionOrder({ symbol: contract.symbol as string, qty: 1, side: "buy", type: "limit", time_in_force: "gtc", limit_price: q.askPrice > 0 ? q.askPrice : q.midPrice });
               await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${closeCost}, "closedReason" = 'STOP_LOSS' WHERE id = ${contract.id}`;
               await logDb("TRADE", `STOP-LOSS: Closed ${contract.symbol} at $${closeCost.toFixed(2)}`, symbol, stopLoss.data);
               continue;
@@ -71,7 +71,7 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
           const profitPct = ((Number(contract.premium) - currentCost) / Number(contract.premium)) * 100;
           if (profitPct >= profitTarget) {
             log(`${symbol}: ${profitTarget}% profit hit (${profitPct.toFixed(0)}%), closing`);
-            await submitOptionOrder({ symbol: contract.symbol as string, qty: 1, side: "buy", type: "market", time_in_force: "day" });
+            await submitOptionOrder({ symbol: contract.symbol as string, qty: 1, side: "buy", type: "limit", time_in_force: "gtc", limit_price: q.askPrice > 0 ? q.askPrice : q.midPrice });
             await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${currentCost}, "closedReason" = 'PROFIT_TARGET' WHERE id = ${contract.id}`;
             await logDb("TRADE", `CLOSED at ${profitTarget}% profit: ${contract.symbol}`, symbol);
           }
@@ -240,7 +240,7 @@ async function execNakedPut(
   }
 
   log(`${symbol}: SELL PUT ${put.symbol} $${put.strikePrice} prem=$${premium.toFixed(2)}`);
-  const order = await submitOptionOrder({ symbol: put.symbol, qty: 1, side: "sell", type: "market", time_in_force: "day" });
+  const order = await submitOptionOrder({ symbol: put.symbol, qty: 1, side: "sell", type: "limit", time_in_force: "gtc", limit_price: q.bidPrice > 0 ? q.bidPrice : q.midPrice });
   await sql`INSERT INTO "Contract" (id, "cycleId", type, action, symbol, "strikePrice", expiration, premium, quantity, status, "alpacaOrderId") VALUES (${genId()}, ${cycleId}, 'PUT', 'SELL_TO_OPEN', ${put.symbol}, ${put.strikePrice}, ${new Date(put.expirationDate)}, ${premium}, 1, 'OPEN', ${String(order.id || '')})`;
   await sql`UPDATE "WheelCycle" SET "totalPremium" = "totalPremium" + ${premium} WHERE id = ${cycleId}`;
   await logDb("TRADE", `SOLD PUT: ${put.symbol} | Strike: $${put.strikePrice} | Premium: $${premium.toFixed(2)}`, symbol);
@@ -314,7 +314,7 @@ async function execCoveredCall(
   if (!callCheck.allowed) { log(`${symbol}: GUARD — ${callCheck.reason}`); await logDb("WARN", callCheck.reason!, symbol); return; }
 
   log(`${symbol}: SELL CALL ${call.symbol} $${call.strikePrice} prem=$${premium.toFixed(2)}`);
-  const order = await submitOptionOrder({ symbol: call.symbol, qty: 1, side: "sell", type: "market", time_in_force: "day" });
+  const order = await submitOptionOrder({ symbol: call.symbol, qty: 1, side: "sell", type: "limit", time_in_force: "gtc", limit_price: q.bidPrice > 0 ? q.bidPrice : q.midPrice });
   await sql`INSERT INTO "Contract" (id, "cycleId", type, action, symbol, "strikePrice", expiration, premium, quantity, status, "alpacaOrderId") VALUES (${genId()}, ${cycleId}, 'CALL', 'SELL_TO_OPEN', ${call.symbol}, ${call.strikePrice}, ${new Date(call.expirationDate)}, ${premium}, 1, 'OPEN', ${String(order.id || '')})`;
   await sql`UPDATE "WheelCycle" SET "totalPremium" = "totalPremium" + ${premium} WHERE id = ${cycleId}`;
   await logDb("TRADE", `SOLD CALL: ${call.symbol} | Strike: $${call.strikePrice} | Premium: $${premium.toFixed(2)}`, symbol);

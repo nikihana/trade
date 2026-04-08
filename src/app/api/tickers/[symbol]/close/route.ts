@@ -38,8 +38,9 @@ export async function POST(
           symbol: contract.symbol as string,
           qty: 1,
           side: "buy",
-          type: "market",
-          time_in_force: "day",
+          type: "limit",
+          time_in_force: "gtc",
+          limit_price: quote.askPrice > 0 ? quote.askPrice : quote.midPrice,
         });
 
         // Update DB
