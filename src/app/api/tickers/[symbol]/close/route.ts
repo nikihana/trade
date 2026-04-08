@@ -61,6 +61,16 @@ export async function POST(
       }
     }
 
+    // Deactivate the ticker so it disappears from the dashboard
+    await sql`UPDATE "Ticker" SET active = false WHERE symbol = ${upper}`;
+
+    // Complete any open wheel cycles
+    await sql`
+      UPDATE "WheelCycle" SET "completedAt" = now()
+      WHERE "tickerId" IN (SELECT id FROM "Ticker" WHERE symbol = ${upper})
+      AND "completedAt" IS NULL
+    `;
+
     return NextResponse.json({ closed: results });
   } catch (error) {
     return NextResponse.json(
