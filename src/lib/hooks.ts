@@ -32,6 +32,14 @@ export function useTickerCycles(symbol: string) {
   });
 }
 
+export function useTickerPositions(symbol: string) {
+  return useSWR(
+    symbol ? `/api/tickers/${symbol}/positions` : null,
+    fetcher,
+    { refreshInterval: 15000 }
+  );
+}
+
 export function useOptionsChain(
   symbol: string,
   params?: Record<string, string>
