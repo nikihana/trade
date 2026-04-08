@@ -5,6 +5,7 @@ import { useState } from "react";
 import { WheelStageIndicator } from "./WheelStageIndicator";
 import { CloseConfirmModal } from "./CloseConfirmModal";
 import { EditAllocationModal } from "./EditAllocationModal";
+import { refreshAll } from "@/lib/hooks";
 
 interface TickerData {
   id: string;
@@ -81,13 +82,25 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
             >
               Edit
             </button>
-            {ticker.openContract && (
+            {ticker.openContract ? (
               <button
                 onClick={(e) => { e.preventDefault(); setShowClose(true); }}
                 className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-1.5 py-0.5 rounded hover:bg-red-900/20"
                 title="Close position"
               >
                 Close
+              </button>
+            ) : (
+              <button
+                onClick={async (e) => {
+                  e.preventDefault();
+                  await fetch(`/api/tickers/${ticker.symbol}`, { method: "DELETE" });
+                  refreshAll();
+                }}
+                className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-1.5 py-0.5 rounded hover:bg-red-900/20"
+                title="Remove"
+              >
+                Remove
               </button>
             )}
           </div>
