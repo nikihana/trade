@@ -18,6 +18,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Wheel Trader",
   description: "Automated options wheel strategy dashboard",
+  icons: {
+    icon: "/favicon-32.png",
+    apple: "/apple-touch-icon.png",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
@@ -46,7 +50,7 @@ export default function RootLayout({
       <body className="min-h-full bg-zinc-950 text-white">
         <Providers>
           <NavBar />
-          <main className="max-w-2xl mx-auto px-4 pt-4 pb-24 sm:pt-24">
+          <main className="max-w-2xl mx-auto px-4 pt-4 pb-24 sm:pt-6">
             {children}
           </main>
           <VersionFooter />
