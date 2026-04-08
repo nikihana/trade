@@ -1,5 +1,27 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { sql } from "@/lib/db";
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ symbol: string }> }
+) {
+  try {
+    const { symbol } = await params;
+    const { allocation, strikePreference } = await request.json();
+
+    const updates: string[] = [];
+    if (allocation !== undefined) {
+      await sql`UPDATE "Ticker" SET allocation = ${Number(allocation)} WHERE symbol = ${symbol.toUpperCase()}`;
+    }
+    if (strikePreference !== undefined) {
+      await sql`UPDATE "Ticker" SET "strikePreference" = ${strikePreference} WHERE symbol = ${symbol.toUpperCase()}`;
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });
+  }
+}
 
 export async function DELETE(
   _request: Request,

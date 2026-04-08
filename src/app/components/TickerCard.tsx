@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { WheelStageIndicator } from "./WheelStageIndicator";
 import { CloseConfirmModal } from "./CloseConfirmModal";
+import { EditAllocationModal } from "./EditAllocationModal";
 
 interface TickerData {
   id: string;
@@ -46,6 +47,7 @@ const strikeLabels: Record<string, string> = {
 
 export function TickerCard({ ticker }: { ticker: TickerData }) {
   const [showClose, setShowClose] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
 
   return (
     <>
@@ -72,6 +74,13 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
             <span className="text-zinc-500 text-xs">
               {fmt(ticker.totalPremium)} prem
             </span>
+            <button
+              onClick={(e) => { e.preventDefault(); setShowEdit(true); }}
+              className="text-xs text-zinc-500 hover:text-blue-400 transition-colors px-1.5 py-0.5 rounded hover:bg-blue-900/20"
+              title="Edit allocation"
+            >
+              Edit
+            </button>
             {ticker.openContract && (
               <button
                 onClick={(e) => { e.preventDefault(); setShowClose(true); }}
@@ -129,11 +138,17 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
         )}
       </div>
 
-      {/* Close confirmation modal */}
       {showClose && (
         <CloseConfirmModal
           symbol={ticker.symbol}
           onClose={() => setShowClose(false)}
+        />
+      )}
+      {showEdit && (
+        <EditAllocationModal
+          symbol={ticker.symbol}
+          currentAllocation={ticker.allocation}
+          onClose={() => setShowEdit(false)}
         />
       )}
     </>

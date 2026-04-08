@@ -9,8 +9,32 @@ import { CapitalBar } from "./components/CapitalBar";
 import { CandidatesCard } from "./components/CandidatesCard";
 import { useTickers } from "@/lib/hooks";
 
+interface TickerData {
+  id: string;
+  symbol: string;
+  stage: string | null;
+  totalPremium: number;
+  costBasis: number | null;
+  sharesHeld: number;
+  allocation: number;
+  strikePreference: string;
+  livePL: number | null;
+  openContract: null | {
+    type: string;
+    strikePrice: number;
+    expiration: string;
+    premium: number;
+    status: string;
+    buybackCost?: number;
+  };
+}
+
 export default function Home() {
   const { data: tickers, isLoading } = useTickers();
+
+  const allTickers: TickerData[] = tickers || [];
+  const active = allTickers.filter((t) => t.openContract);
+  const pending = allTickers.filter((t) => !t.openContract);
 
   return (
     <div className="space-y-6">
@@ -36,63 +60,56 @@ export default function Home() {
         <CandidatesCard />
       </section>
 
-      {/* Active wheels */}
+      {/* Active wheels — only tickers with open contracts */}
       <section>
         <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-3">
           Active Wheels
+          {active.length > 0 && (
+            <span className="text-zinc-600 ml-2 font-normal">({active.length})</span>
+          )}
         </h2>
 
         {isLoading ? (
           <div className="space-y-3">
-            {[...Array(3)].map((_, i) => (
-              <div
-                key={i}
-                className="bg-zinc-800 rounded-xl p-4 animate-pulse h-32"
-              />
+            {[...Array(2)].map((_, i) => (
+              <div key={i} className="bg-zinc-800 rounded-xl p-4 animate-pulse h-32" />
             ))}
           </div>
-        ) : tickers?.length > 0 ? (
+        ) : active.length > 0 ? (
           <div className="space-y-3">
-            {tickers.map(
-              (ticker: {
-                id: string;
-                symbol: string;
-                stage: string | null;
-                totalPremium: number;
-                costBasis: number | null;
-                sharesHeld: number;
-                allocation: number;
-                strikePreference: string;
-                livePL: number | null;
-                openContract: null | {
-                  type: string;
-                  strikePrice: number;
-                  expiration: string;
-                  premium: number;
-                  status: string;
-                };
-              }) => (
-                <TickerCard key={ticker.id} ticker={ticker} />
-              )
-            )}
+            {active.map((ticker) => (
+              <TickerCard key={ticker.id} ticker={ticker} />
+            ))}
           </div>
         ) : (
-          <div className="text-center py-12 text-zinc-500">
-            <p className="text-4xl mb-3">🎡</p>
-            <p className="text-lg font-medium text-zinc-400">
-              No wheels spinning yet
-            </p>
-            <p className="text-sm mt-1">
-              Add a ticker below to start the wheel strategy
-            </p>
+          <div className="text-center py-8 text-zinc-500 text-sm">
+            No active positions. Add a ticker and run a tick to open a trade.
           </div>
         )}
-
-        <div className="mt-4 space-y-3">
-          <AddTickerDialog />
-          <RunTickButton />
-        </div>
       </section>
+
+      {/* Pending — tickers added but no trade executed yet */}
+      {!isLoading && pending.length > 0 && (
+        <section>
+          <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-3">
+            Pending
+            <span className="text-zinc-600 ml-2 font-normal">({pending.length})</span>
+          </h2>
+          <div className="space-y-3">
+            {pending.map((ticker) => (
+              <TickerCard key={ticker.id} ticker={ticker} />
+            ))}
+          </div>
+          <p className="text-xs text-zinc-600 mt-2">
+            These tickers are queued but no trade has been executed yet. Run a tick or wait for the next cron.
+          </p>
+        </section>
+      )}
+
+      <div className="space-y-3">
+        <AddTickerDialog />
+        <RunTickButton />
+      </div>
     </div>
   );
 }
