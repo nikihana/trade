@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { signOut } from "next-auth/react";
 import { BotStatusBadge } from "./BotStatusBadge";
 
 const navItems = [
@@ -24,9 +25,17 @@ export function NavBar() {
             </h1>
             <BotStatusBadge />
           </div>
-          <span className="text-xs bg-yellow-900 text-yellow-300 px-2 py-1 rounded-full font-medium">
-            PAPER
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-xs bg-yellow-900 text-yellow-300 px-2 py-1 rounded-full font-medium">
+              PAPER
+            </span>
+            <button
+              onClick={() => signOut({ callbackUrl: "/login" })}
+              className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-2 py-1"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
 
