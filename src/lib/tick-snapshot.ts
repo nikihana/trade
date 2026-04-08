@@ -29,7 +29,7 @@ export async function logTickSnapshot() {
 
     // Get open option contract quote
     const openContracts = await sql`
-      SELECT symbol, type, "strikePrice", premium FROM "Contract" c
+      SELECT c.symbol, c.type, c."strikePrice", c.premium FROM "Contract" c
       JOIN "WheelCycle" wc ON wc.id = c."cycleId"
       JOIN "Ticker" t ON t.id = wc."tickerId"
       WHERE t.symbol = ${symbol} AND c.status IN ('OPEN', 'PENDING')
