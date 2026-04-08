@@ -5,6 +5,7 @@ import { TickerCard } from "./components/TickerCard";
 import { AddTickerDialog } from "./components/AddTickerDialog";
 import { RunTickButton } from "./components/RunTickButton";
 import { RegimeBadge } from "./components/RegimeBadge";
+import { CapitalBar } from "./components/CapitalBar";
 import { useTickers } from "@/lib/hooks";
 
 export default function Home() {
@@ -22,6 +23,9 @@ export default function Home() {
         </h2>
         <PortfolioCard />
       </section>
+
+      {/* Capital deployment */}
+      <CapitalBar />
 
       {/* Active wheels */}
       <section>
@@ -48,6 +52,8 @@ export default function Home() {
                 totalPremium: number;
                 costBasis: number | null;
                 sharesHeld: number;
+                allocation: number;
+                strikePreference: string;
                 openContract: null | {
                   type: string;
                   strikePrice: number;

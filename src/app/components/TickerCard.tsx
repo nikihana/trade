@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { WheelStageIndicator } from "./WheelStageIndicator";
+import { CloseConfirmModal } from "./CloseConfirmModal";
 
 interface TickerData {
   id: string;
@@ -10,6 +12,8 @@ interface TickerData {
   totalPremium: number;
   costBasis: number | null;
   sharesHeld: number;
+  allocation: number;
+  strikePreference: string;
   openContract: {
     type: string;
     strikePrice: number;
@@ -26,16 +30,51 @@ function fmt(n: number) {
   }).format(n);
 }
 
+function fmtK(n: number) {
+  if (n >= 1000) return `$${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k`;
+  return fmt(n);
+}
+
+const strikeLabels: Record<string, string> = {
+  "30-delta": "30d",
+  "10pct-otm": "10%",
+  "5pct-otm": "5%",
+  "atm": "ATM",
+};
+
 export function TickerCard({ ticker }: { ticker: TickerData }) {
+  const [showClose, setShowClose] = useState(false);
+
   return (
-    <Link href={`/ticker/${ticker.symbol}`}>
-      <div className="bg-zinc-800 rounded-xl p-4 border border-zinc-700 hover:border-blue-500 transition-colors active:scale-[0.98]">
+    <>
+      <div className="bg-zinc-800 rounded-xl p-4 border border-zinc-700">
         {/* Header */}
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-lg font-bold text-white">{ticker.symbol}</h3>
-          <span className="text-green-400 text-sm font-medium">
-            {fmt(ticker.totalPremium)}
-          </span>
+        <div className="flex items-center justify-between mb-2">
+          <Link href={`/ticker/${ticker.symbol}`} className="flex items-center gap-2">
+            <h3 className="text-lg font-bold text-white">{ticker.symbol}</h3>
+            {ticker.allocation > 0 && (
+              <span className="text-xs text-zinc-500 bg-zinc-700 px-1.5 py-0.5 rounded">
+                {fmtK(ticker.allocation)}
+              </span>
+            )}
+            <span className="text-[10px] text-zinc-600">
+              {strikeLabels[ticker.strikePreference] || ticker.strikePreference}
+            </span>
+          </Link>
+          <div className="flex items-center gap-2">
+            <span className="text-green-400 text-sm font-medium">
+              {fmt(ticker.totalPremium)}
+            </span>
+            {ticker.openContract && (
+              <button
+                onClick={(e) => { e.preventDefault(); setShowClose(true); }}
+                className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-1.5 py-0.5 rounded hover:bg-red-900/20"
+                title="Close position"
+              >
+                Close
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Stage indicator */}
@@ -46,8 +85,8 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
           <div className="mt-3 bg-zinc-900 rounded-lg p-3 text-xs">
             <div className="flex justify-between text-zinc-400">
               <span>
-                {ticker.openContract.type === "PUT" ? "📉 Put" : "📈 Call"} @{" "}
-                ${ticker.openContract.strikePrice}
+                {ticker.openContract.type === "PUT" ? "Put" : "Call"} @ $
+                {ticker.openContract.strikePrice}
               </span>
               <span>
                 Exp{" "}
@@ -82,6 +121,14 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
           </div>
         )}
       </div>
-    </Link>
+
+      {/* Close confirmation modal */}
+      {showClose && (
+        <CloseConfirmModal
+          symbol={ticker.symbol}
+          onClose={() => setShowClose(false)}
+        />
+      )}
+    </>
   );
 }

@@ -5,7 +5,7 @@ import { checkTickerApproved, checkAvgVolume } from "@/lib/guards";
 export async function GET() {
   try {
     const tickers = await sql`
-      SELECT t.id, t.symbol, t.active,
+      SELECT t.id, t.symbol, t.active, t.allocation, t."strikePreference",
         wc.id as "cycleId", wc.stage, wc."totalPremium", wc."costBasis", wc."sharesHeld"
       FROM "Ticker" t
       LEFT JOIN "WheelCycle" wc ON wc."tickerId" = t.id AND wc."completedAt" IS NULL
@@ -18,7 +18,7 @@ export async function GET() {
       let openContract = null;
       if (t.cycleId) {
         const contracts = await sql`
-          SELECT type, "strikePrice", expiration, premium, status
+          SELECT id, type, "strikePrice", expiration, premium, status, symbol as "optionSymbol"
           FROM "Contract"
           WHERE "cycleId" = ${t.cycleId} AND status IN ('OPEN', 'PENDING')
           LIMIT 1
@@ -30,6 +30,8 @@ export async function GET() {
         id: t.id,
         symbol: t.symbol,
         active: t.active,
+        allocation: Number(t.allocation) || 0,
+        strikePreference: t.strikePreference || "10pct-otm",
         stage: t.stage || null,
         totalPremium: Number(t.totalPremium) || 0,
         costBasis: t.costBasis ? Number(t.costBasis) : null,
@@ -47,14 +49,19 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const { symbol } = await request.json();
+    const { symbol, allocation, strikePreference } = await request.json();
     if (!symbol || typeof symbol !== "string") {
       return NextResponse.json({ error: "Symbol is required" }, { status: 400 });
     }
 
+    const alloc = Number(allocation) || 0;
+    if (alloc <= 0) {
+      return NextResponse.json({ error: "Allocation must be greater than 0" }, { status: 400 });
+    }
+
+    const strikePref = strikePreference || "10pct-otm";
     const upperSymbol = symbol.toUpperCase().trim();
 
-    // Rule 1: Stock screening
     const approvedCheck = await checkTickerApproved(upperSymbol);
     if (!approvedCheck.allowed) {
       return NextResponse.json({ error: approvedCheck.reason }, { status: 400 });
@@ -69,9 +76,7 @@ export async function POST(request: NextRequest) {
 
     if (existing.length > 0) {
       const ticker = existing[0];
-      if (!ticker.active) {
-        await sql`UPDATE "Ticker" SET active = true WHERE id = ${ticker.id}`;
-      }
+      await sql`UPDATE "Ticker" SET active = true, allocation = ${alloc}, "strikePreference" = ${strikePref} WHERE id = ${ticker.id}`;
       const activeCycle = await sql`SELECT id FROM "WheelCycle" WHERE "tickerId" = ${ticker.id} AND "completedAt" IS NULL`;
       if (activeCycle.length === 0) {
         await sql`INSERT INTO "WheelCycle" (id, "tickerId", stage, "totalPremium", "realizedPL", "sharesHeld") VALUES (${genId()}, ${ticker.id}, 'SELLING_PUTS', 0, 0, 0)`;
@@ -81,7 +86,7 @@ export async function POST(request: NextRequest) {
 
     const tickerId = genId();
     const cycleId = genId();
-    await sql`INSERT INTO "Ticker" (id, symbol, active) VALUES (${tickerId}, ${upperSymbol}, true)`;
+    await sql`INSERT INTO "Ticker" (id, symbol, active, allocation, "strikePreference") VALUES (${tickerId}, ${upperSymbol}, true, ${alloc}, ${strikePref})`;
     await sql`INSERT INTO "WheelCycle" (id, "tickerId", stage, "totalPremium", "realizedPL", "sharesHeld") VALUES (${cycleId}, ${tickerId}, 'SELLING_PUTS', 0, 0, 0)`;
 
     return NextResponse.json({ id: tickerId, symbol: upperSymbol });

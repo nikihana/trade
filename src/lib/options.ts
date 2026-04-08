@@ -5,8 +5,26 @@ import type { AlpacaOptionContract } from "./types";
 
 // ── Strike Selection ─────────────────────────────────────
 
-export async function targetPutStrike(currentPrice: number): Promise<number> {
-  const pct = await getConfigNum("put_strike_pct", 0.10);
+export async function targetPutStrike(
+  currentPrice: number,
+  strikePreference?: string
+): Promise<number> {
+  let pct: number;
+  switch (strikePreference) {
+    case "30-delta":
+      pct = 0.10; // ~30 delta approximation
+      break;
+    case "5pct-otm":
+      pct = 0.05;
+      break;
+    case "atm":
+      pct = 0.01; // slightly OTM
+      break;
+    case "10pct-otm":
+    default:
+      pct = await getConfigNum("put_strike_pct", 0.10);
+      break;
+  }
   return Math.round(currentPrice * (1 - pct));
 }
 
@@ -48,10 +66,11 @@ export async function targetExpiration(now: Date = new Date()): Promise<{
 // ── Find Best Contract ───────────────────────────────────
 
 export async function findBestPut(
-  symbol: string
+  symbol: string,
+  strikePreference?: string
 ): Promise<AlpacaOptionContract | null> {
   const quote = await getLatestQuote(symbol);
-  const strike = await targetPutStrike(quote.lastPrice);
+  const strike = await targetPutStrike(quote.lastPrice, strikePreference);
   const { minDate, maxDate } = await targetExpiration();
   const range = await getConfigNum("strike_range", 5);
 

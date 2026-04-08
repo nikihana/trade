@@ -128,7 +128,7 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
         if (stage === "SELLING_PUTS") {
           switch (regime.regime) {
             case MarketRegime.NORMAL:
-              await execNakedPut(symbol, cycleId, cashAvailable, account.equity, log, logDb);
+              await execNakedPut(symbol, cycleId, cashAvailable, account.equity, ticker.strikePreference as string, log, logDb);
               break;
 
             case MarketRegime.CAUTIOUS:
@@ -209,10 +209,10 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
 // ── Trade Execution Helpers ──────────────────────────────
 
 async function execNakedPut(
-  symbol: string, cycleId: string, cashAvailable: number, equity: number,
+  symbol: string, cycleId: string, cashAvailable: number, equity: number, strikePreference: string,
   log: (msg: string) => void, logDb: (level: string, msg: string, ticker?: string, data?: Record<string, unknown>) => Promise<void>
 ) {
-  const put = await findBestPut(symbol);
+  const put = await findBestPut(symbol, strikePreference);
   if (!put) { log(`${symbol}: No put found`); return; }
   if (cashAvailable < put.strikePrice * 100) { log(`${symbol}: Not enough cash`); return; }
   const q = await getOptionQuote(put.symbol);
