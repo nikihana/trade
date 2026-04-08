@@ -1,8 +1,15 @@
 import { sql, genId } from "./db";
-import { getPositions, submitOptionOrder, getOptionQuote } from "./alpaca";
+import { getPositions, getLatestQuote, submitOptionOrder, getOptionQuote } from "./alpaca";
 import { findBestPut, findBestCall } from "./options";
 import { getConfig, getConfigNum } from "./config";
 import { logTickSnapshot } from "./tick-snapshot";
+import {
+  checkMarketCondition,
+  checkStopLoss,
+  checkPremiumRichness,
+  checkRiskCap,
+  checkCallPremium,
+} from "./guards";
 
 /**
  * Shared tick engine — used by both /api/bot/tick and /api/bot/cron
@@ -10,11 +17,23 @@ import { logTickSnapshot } from "./tick-snapshot";
 export async function runTickEngine(): Promise<{ success: boolean; logs: string[] }> {
   const logs: string[] = [];
   const log = (msg: string) => { logs.push(msg); console.log(`[tick] ${msg}`); };
+  const logWarn = async (msg: string, ticker?: string, data?: Record<string, unknown>) => {
+    log(`GUARD: ${msg}`);
+    await sql`INSERT INTO "TradeLog" (id, timestamp, level, ticker, message, data) VALUES (${genId()}, now(), 'WARN', ${ticker || null}, ${msg}, ${data ? JSON.stringify(data) : null})`;
+  };
 
   try {
-    // Snapshot first
+    // ── Snapshot ──
     const account = await logTickSnapshot();
     log(`Snapshot: cash=$${account.cash.toFixed(0)} equity=$${account.equity.toFixed(0)}`);
+
+    // ── Rule 8: Market condition check ──
+    const marketCheck = await checkMarketCondition();
+    if (!marketCheck.allowed) {
+      log(`MARKET GUARD: ${marketCheck.reason}`);
+      await sql`INSERT INTO "TradeLog" (id, timestamp, level, message, data) VALUES (${genId()}, now(), 'WARN', ${marketCheck.reason}, ${JSON.stringify(marketCheck.data || {})})`;
+    }
+    const marketOk = marketCheck.allowed;
 
     const profitTarget = await getConfigNum("profit_target_pct", 50);
 
@@ -23,6 +42,7 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
       alpacaPositions.filter((p) => !p.symbol.includes(" ")).map((p) => [p.symbol, p])
     );
 
+    // ── Monitor active cycles ──
     const activeCycles = await sql`
       SELECT wc.*, t.symbol FROM "WheelCycle" wc
       JOIN "Ticker" t ON t.id = wc."tickerId"
@@ -35,9 +55,24 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
       const position = stockPositions.get(symbol);
       const hasShares = position && position.qty >= 100;
 
-      // Check profit target on open contracts
       for (const contract of openContracts) {
         try {
+          // ── Rule 3: Stop-loss check (before profit check) ──
+          if (contract.type === "PUT") {
+            const currentPrice = (await getLatestQuote(symbol)).lastPrice;
+            const stopLoss = await checkStopLoss(currentPrice, Number(contract.strikePrice));
+            if (!stopLoss.allowed) {
+              log(`${symbol}: ${stopLoss.reason}`);
+              const quote = await getOptionQuote(contract.symbol as string);
+              const closeCost = quote.midPrice * 100;
+              await submitOptionOrder({ symbol: contract.symbol as string, qty: 1, side: "buy", type: "market", time_in_force: "day" });
+              await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${closeCost}, "closedReason" = 'STOP_LOSS' WHERE id = ${contract.id}`;
+              await sql`INSERT INTO "TradeLog" (id, timestamp, level, ticker, message, data) VALUES (${genId()}, now(), 'TRADE', ${symbol}, ${`STOP-LOSS: Closed ${contract.symbol} at $${closeCost.toFixed(2)}`}, ${JSON.stringify(stopLoss.data || {})})`;
+              continue; // skip profit check
+            }
+          }
+
+          // ── Rule 4: Profit target check ──
           const quote = await getOptionQuote(contract.symbol as string);
           if (quote.midPrice <= 0) continue;
           const currentCost = quote.midPrice * 100;
@@ -75,7 +110,7 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
       await sql`UPDATE "Contract" SET status = 'EXPIRED', "closedAt" = now(), "closedReason" = 'EXPIRATION' WHERE "cycleId" = ${cycle.id} AND status = 'OPEN' AND expiration < now()`;
     }
 
-    // Execute new trades
+    // ── Execute new trades ──
     const tickers = await sql`SELECT t.*, wc.id as "cycleId", wc.stage, wc."costBasis", wc."totalPremium" FROM "Ticker" t LEFT JOIN "WheelCycle" wc ON wc."tickerId" = t.id AND wc."completedAt" IS NULL WHERE t.active = true`;
     let cashAvailable = account.cash;
 
@@ -94,13 +129,34 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
 
       const stage = ticker.stage as string || "SELLING_PUTS";
 
+      // ── SELLING PUTS ──
       if (stage === "SELLING_PUTS") {
+        // Rule 8: Market gate
+        if (!marketOk) {
+          log(`${symbol}: Skipping put sale — market condition unfavorable`);
+          continue;
+        }
+
         const put = await findBestPut(symbol);
         if (!put) { log(`${symbol}: No put found`); continue; }
         if (cashAvailable < put.strikePrice * 100) { log(`${symbol}: Not enough cash`); continue; }
         const quote = await getOptionQuote(put.symbol);
         const premium = quote.midPrice * 100;
         if (premium <= 0) { log(`${symbol}: No premium`); continue; }
+
+        // Rule 2: Premium richness (IV proxy)
+        const premCheck = await checkPremiumRichness(premium, put.strikePrice);
+        if (!premCheck.allowed) {
+          await logWarn(premCheck.reason!, symbol, premCheck.data);
+          continue;
+        }
+
+        // Rule 7: Risk cap
+        const riskCheck = await checkRiskCap(put.strikePrice, account.equity, cashAvailable - put.strikePrice * 100);
+        if (!riskCheck.allowed) {
+          await logWarn(riskCheck.reason!, symbol, riskCheck.data);
+          continue;
+        }
 
         log(`${symbol}: SELL PUT ${put.symbol} $${put.strikePrice} prem=$${premium.toFixed(2)}`);
         const order = await submitOptionOrder({ symbol: put.symbol, qty: 1, side: "sell", type: "market", time_in_force: "day" });
@@ -110,12 +166,20 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
         cashAvailable -= put.strikePrice * 100;
       }
 
+      // ── SELLING CALLS ──
       if (stage === "SELLING_CALLS" && ticker.costBasis) {
         const call = await findBestCall(symbol, Number(ticker.costBasis));
         if (!call) { log(`${symbol}: No call found`); continue; }
         const quote = await getOptionQuote(call.symbol);
         const premium = quote.midPrice * 100;
         if (premium <= 0) { log(`${symbol}: No premium`); continue; }
+
+        // Rule 5: Minimum call premium
+        const callCheck = await checkCallPremium(premium);
+        if (!callCheck.allowed) {
+          await logWarn(callCheck.reason!, symbol, callCheck.data);
+          continue;
+        }
 
         log(`${symbol}: SELL CALL ${call.symbol} $${call.strikePrice} prem=$${premium.toFixed(2)}`);
         const order = await submitOptionOrder({ symbol: call.symbol, qty: 1, side: "sell", type: "market", time_in_force: "day" });
@@ -127,7 +191,6 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
 
     log("Tick complete");
 
-    // Ping healthcheck on success
     const healthcheckUrl = await getConfig("healthcheck_url");
     if (healthcheckUrl) {
       try { await fetch(healthcheckUrl); } catch { /* ignore */ }
@@ -138,7 +201,6 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
     const msg = error instanceof Error ? error.message : String(error);
     log(`ERROR: ${msg}`);
 
-    // Ping healthcheck /fail on error
     const healthcheckUrl = await getConfig("healthcheck_url");
     if (healthcheckUrl) {
       try { await fetch(`${healthcheckUrl}/fail`); } catch { /* ignore */ }

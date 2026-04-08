@@ -32,6 +32,7 @@ export enum CloseReason {
   EXPIRATION = "EXPIRATION",
   ASSIGNMENT = "ASSIGNMENT",
   MANUAL = "MANUAL",
+  STOP_LOSS = "STOP_LOSS",
 }
 
 // Log levels

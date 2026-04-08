@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql, genId } from "@/lib/db";
+import { checkTickerApproved, checkAvgVolume } from "@/lib/guards";
 
 export async function GET() {
   try {
@@ -52,6 +53,17 @@ export async function POST(request: NextRequest) {
     }
 
     const upperSymbol = symbol.toUpperCase().trim();
+
+    // Rule 1: Stock screening
+    const approvedCheck = await checkTickerApproved(upperSymbol);
+    if (!approvedCheck.allowed) {
+      return NextResponse.json({ error: approvedCheck.reason }, { status: 400 });
+    }
+
+    const volumeCheck = await checkAvgVolume(upperSymbol);
+    if (!volumeCheck.allowed) {
+      return NextResponse.json({ error: volumeCheck.reason }, { status: 400 });
+    }
 
     const existing = await sql`SELECT id, active FROM "Ticker" WHERE symbol = ${upperSymbol}`;
 

@@ -59,6 +59,33 @@ export async function getPositions(): Promise<AlpacaPosition[]> {
   }));
 }
 
+// ── Historical Bars ──────────────────────────────────────
+
+export async function getHistoricalBars(
+  symbol: string,
+  params: { timeframe?: string; limit?: number } = {}
+): Promise<
+  { timestamp: string; open: number; high: number; low: number; close: number; volume: number }[]
+> {
+  const timeframe = params.timeframe || "1Day";
+  const limit = params.limit || 60;
+  const data = await api<{
+    bars: { t: string; o: number; h: number; l: number; c: number; v: number }[];
+  }>(
+    `/v2/stocks/${symbol}/bars?timeframe=${timeframe}&limit=${limit}`,
+    undefined,
+    DATA_URL
+  );
+  return (data.bars || []).map((b) => ({
+    timestamp: b.t,
+    open: b.o,
+    high: b.h,
+    low: b.l,
+    close: b.c,
+    volume: b.v,
+  }));
+}
+
 // ── Latest Quote ─────────────────────────────────────────
 
 export async function getLatestQuote(

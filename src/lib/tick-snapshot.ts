@@ -43,27 +43,34 @@ export async function logTickSnapshot() {
       } catch { /* skip */ }
     }
 
+    const unrealizedPL = pos ? Math.round(pos.unrealizedPL * 100) / 100 : 0;
+    const premium = Number(cycle.totalPremium);
+
     tickerSnapshots.push({
       symbol,
       price: Math.round(price * 100) / 100,
       stage: cycle.stage,
-      premium: Number(cycle.totalPremium),
+      premium,
       shares: Number(cycle.sharesHeld),
       costBasis: cycle.costBasis ? Number(cycle.costBasis) : null,
-      unrealizedPL: pos ? Math.round(pos.unrealizedPL * 100) / 100 : 0,
+      unrealizedPL,
       optionMid: Math.round(optionMid * 100) / 100,
+      trueNetReturn: Math.round((premium + unrealizedPL) * 100) / 100,
     });
   }
+
+  const totalTrueNetReturn = tickerSnapshots.reduce((s, t) => s + t.trueNetReturn, 0);
 
   const snapshot = {
     cash: Math.round(account.cash * 100) / 100,
     equity: Math.round(account.equity * 100) / 100,
     buyingPower: Math.round(account.buyingPower * 100) / 100,
+    totalTrueNetReturn: Math.round(totalTrueNetReturn * 100) / 100,
     positions: tickerSnapshots,
   };
 
   const summary = tickerSnapshots
-    .map((t) => `${t.symbol}: $${t.price} [${t.stage}] opt=$${t.optionMid}`)
+    .map((t) => `${t.symbol}: $${t.price} [${t.stage}] net=$${t.trueNetReturn}`)
     .join(" | ");
 
   await sql`INSERT INTO "TradeLog" (id, timestamp, level, message, data)

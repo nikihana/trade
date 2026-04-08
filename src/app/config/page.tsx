@@ -29,13 +29,31 @@ const categories: { title: string; keys: string[] }[] = [
     ],
   },
   {
+    title: "Risk Management",
+    keys: [
+      "stop_loss_pct",
+      "max_position_pct",
+      "min_cash_pct",
+      "min_premium_pct",
+      "min_call_premium",
+    ],
+  },
+  {
+    title: "Market & Screening",
+    keys: [
+      "market_check_enabled",
+      "min_avg_volume",
+      "approved_tickers",
+    ],
+  },
+  {
     title: "Schedule & UI",
     keys: ["cron_schedule", "dashboard_refresh_min", "healthcheck_url"],
   },
 ];
 
 // Keys where the input should be full-width below the label
-const fullWidthKeys = new Set(["healthcheck_url", "cron_schedule"]);
+const fullWidthKeys = new Set(["healthcheck_url", "cron_schedule", "approved_tickers"]);
 
 export default function ConfigPage() {
   const [config, setConfig] = useState<ConfigRow[]>([]);

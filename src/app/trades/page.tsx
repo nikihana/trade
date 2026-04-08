@@ -49,6 +49,11 @@ function PositionsTab() {
                   <>
                     <span className="text-white font-medium">Cash {fmt(parsed.cash)}</span>
                     <span className="text-zinc-400">Equity {fmt(parsed.equity)}</span>
+                    {parsed.totalTrueNetReturn !== undefined && (
+                      <span className={parsed.totalTrueNetReturn >= 0 ? "text-green-400" : "text-red-400"}>
+                        Net {fmt(parsed.totalTrueNetReturn)}
+                      </span>
+                    )}
                   </>
                 )}
               </div>
@@ -65,13 +70,14 @@ function PositionsTab() {
                       <th className="text-left px-3 py-1.5 font-medium">Stage</th>
                       <th className="text-right px-3 py-1.5 font-medium">Opt Mid</th>
                       <th className="text-right px-3 py-1.5 font-medium">Premium</th>
-                      <th className="text-right px-4 py-1.5 font-medium">P&L</th>
+                      <th className="text-right px-3 py-1.5 font-medium">P&L</th>
+                      <th className="text-right px-4 py-1.5 font-medium">Net Return</th>
                     </tr>
                   </thead>
                   <tbody>
                     {positions
                       .sort((a: { symbol: string }, b: { symbol: string }) => a.symbol.localeCompare(b.symbol))
-                      .map((p: { symbol: string; price: number; stage: string; optionMid: number; premium: number; unrealizedPL: number }) => (
+                      .map((p: { symbol: string; price: number; stage: string; optionMid: number; premium: number; unrealizedPL: number; trueNetReturn?: number }) => (
                         <tr key={p.symbol} className="border-b border-zinc-700/30">
                           <td className="px-4 py-2 font-bold text-white">{p.symbol}</td>
                           <td className="px-3 py-2 text-right text-zinc-300">{fmt(p.price)}</td>
@@ -86,8 +92,11 @@ function PositionsTab() {
                           </td>
                           <td className="px-3 py-2 text-right font-mono text-zinc-400">${p.optionMid.toFixed(2)}</td>
                           <td className="px-3 py-2 text-right text-green-400">{fmt(p.premium)}</td>
-                          <td className={`px-4 py-2 text-right font-medium ${p.unrealizedPL >= 0 ? "text-green-400" : "text-red-400"}`}>
+                          <td className={`px-3 py-2 text-right font-medium ${p.unrealizedPL >= 0 ? "text-green-400" : "text-red-400"}`}>
                             {fmt(p.unrealizedPL)}
+                          </td>
+                          <td className={`px-4 py-2 text-right font-bold ${(p.trueNetReturn || 0) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                            {fmt(p.trueNetReturn || 0)}
                           </td>
                         </tr>
                       ))}
