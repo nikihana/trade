@@ -61,7 +61,9 @@ export function CloseConfirmModal({
     }
   }
 
+  const totalPremium = contracts.reduce((s, c) => s + c.premium, 0);
   const totalCost = contracts.reduce((s, c) => s + c.estimatedCost, 0);
+  const netPL = totalPremium - totalCost;
 
   return (
     <div
@@ -99,34 +101,56 @@ export function CloseConfirmModal({
                 The following will be bought-to-close on Alpaca:
               </p>
               <div className="space-y-2 mb-4">
-                {contracts.map((c) => (
-                  <div
-                    key={c.symbol}
-                    className="bg-zinc-800 rounded-lg p-3 text-sm"
-                  >
-                    <div className="flex justify-between">
-                      <span className="font-medium text-white">
-                        {c.type === "PUT" ? "Put" : "Call"} @ ${c.strikePrice}
-                      </span>
-                      <span className="text-red-400">
-                        Cost: ~{fmt(c.estimatedCost)}
-                      </span>
+                {contracts.map((c) => {
+                  const cNetPL = c.premium - c.estimatedCost;
+                  return (
+                    <div
+                      key={c.symbol}
+                      className="bg-zinc-800 rounded-lg p-3 text-sm"
+                    >
+                      <div className="flex justify-between">
+                        <span className="font-medium text-white">
+                          {c.type === "PUT" ? "Put" : "Call"} @ ${c.strikePrice}
+                        </span>
+                        <span className={`font-bold ${cNetPL >= 0 ? "text-green-400" : "text-red-400"}`}>
+                          {cNetPL >= 0 ? "+" : ""}{fmt(cNetPL)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between mt-1.5 text-xs text-zinc-400">
+                        <span>Premium: <span className="text-green-400">{fmt(c.premium)}</span></span>
+                        <span>Buyback: <span className="text-red-300">{fmt(c.estimatedCost)}</span></span>
+                      </div>
+                      <div className="text-xs text-zinc-500 mt-1 font-mono truncate">
+                        {c.symbol}
+                      </div>
+                      {c.spreadType && (
+                        <span className="text-[10px] text-purple-400">
+                          {c.spreadType}
+                        </span>
+                      )}
                     </div>
-                    <div className="text-xs text-zinc-500 mt-1 font-mono truncate">
-                      {c.symbol}
-                    </div>
-                    {c.spreadType && (
-                      <span className="text-[10px] text-purple-400">
-                        {c.spreadType}
-                      </span>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
-              <div className="flex justify-between text-sm mb-4 px-1">
-                <span className="text-zinc-400">Estimated total cost:</span>
-                <span className="text-red-400 font-bold">{fmt(totalCost)}</span>
+              {/* P&L Summary */}
+              <div className="bg-zinc-800 rounded-lg p-3 mb-4 space-y-1.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-400">Premium collected</span>
+                  <span className="text-green-400 font-medium">{fmt(totalPremium)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-zinc-400">Buyback cost</span>
+                  <span className="text-red-300 font-medium">{fmt(totalCost)}</span>
+                </div>
+                <div className="border-t border-zinc-700 pt-1.5 flex justify-between text-sm">
+                  <span className="text-white font-bold">
+                    {netPL >= 0 ? "Net gain" : "Net loss"}
+                  </span>
+                  <span className={`font-bold text-lg ${netPL >= 0 ? "text-green-400" : "text-red-400"}`}>
+                    {netPL >= 0 ? "+" : ""}{fmt(netPL)}
+                  </span>
+                </div>
               </div>
 
               {result && (
@@ -152,7 +176,7 @@ export function CloseConfirmModal({
               >
                 {closing
                   ? "Closing..."
-                  : `Confirm Close — ${fmt(totalCost)}`}
+                  : `Confirm Close — ${netPL >= 0 ? "+" : ""}${fmt(netPL)}`}
               </button>
             </>
           )}

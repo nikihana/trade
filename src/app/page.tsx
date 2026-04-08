@@ -54,6 +54,7 @@ export default function Home() {
                 sharesHeld: number;
                 allocation: number;
                 strikePreference: string;
+                livePL: number | null;
                 openContract: null | {
                   type: string;
                   strikePrice: number;

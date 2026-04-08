@@ -14,12 +14,14 @@ interface TickerData {
   sharesHeld: number;
   allocation: number;
   strikePreference: string;
+  livePL: number | null;
   openContract: {
     type: string;
     strikePrice: number;
     expiration: string;
     premium: number;
     status: string;
+    buybackCost?: number;
   } | null;
 }
 
@@ -62,8 +64,13 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
             </span>
           </Link>
           <div className="flex items-center gap-2">
-            <span className="text-green-400 text-sm font-medium">
-              {fmt(ticker.totalPremium)}
+            {ticker.livePL !== null && (
+              <span className={`text-sm font-bold ${ticker.livePL >= 0 ? "text-green-400" : "text-red-400"}`}>
+                {ticker.livePL >= 0 ? "+" : ""}{fmt(ticker.livePL)}
+              </span>
+            )}
+            <span className="text-zinc-500 text-xs">
+              {fmt(ticker.totalPremium)} prem
             </span>
             {ticker.openContract && (
               <button

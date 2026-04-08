@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql, genId } from "@/lib/db";
+import { getOptionQuote } from "@/lib/alpaca";
 import { checkTickerApproved, checkAvgVolume } from "@/lib/guards";
 
 export async function GET() {
@@ -23,8 +24,26 @@ export async function GET() {
           WHERE "cycleId" = ${t.cycleId} AND status IN ('OPEN', 'PENDING')
           LIMIT 1
         `;
-        openContract = contracts[0] || null;
+        if (contracts[0]) {
+          const c = contracts[0];
+          let buybackCost = 0;
+          try {
+            const q = await getOptionQuote(c.optionSymbol as string);
+            buybackCost = Math.round(q.midPrice * 100 * 100) / 100;
+          } catch { /* skip */ }
+          openContract = {
+            type: c.type,
+            strikePrice: c.strikePrice,
+            expiration: c.expiration,
+            premium: Number(c.premium),
+            status: c.status,
+            buybackCost,
+          };
+        }
       }
+
+      const premium = openContract ? openContract.premium : 0;
+      const buyback = openContract ? openContract.buybackCost : 0;
 
       result.push({
         id: t.id,
@@ -38,6 +57,7 @@ export async function GET() {
         sharesHeld: Number(t.sharesHeld) || 0,
         openContract,
         cycleId: t.cycleId || null,
+        livePL: premium > 0 ? Math.round((premium - buyback) * 100) / 100 : null,
       });
     }
 
