@@ -1,7 +1,7 @@
 import { sql, genId } from "./db";
 import { getPositions, submitOptionOrder, getOptionQuote } from "./alpaca";
 import { findBestPut, findBestCall } from "./options";
-import { getConfigNum } from "./config";
+import { getConfig, getConfigNum } from "./config";
 import { logTickSnapshot } from "./tick-snapshot";
 
 /**
@@ -126,10 +126,24 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
     }
 
     log("Tick complete");
+
+    // Ping healthcheck on success
+    const healthcheckUrl = await getConfig("healthcheck_url");
+    if (healthcheckUrl) {
+      try { await fetch(healthcheckUrl); } catch { /* ignore */ }
+    }
+
     return { success: true, logs };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     log(`ERROR: ${msg}`);
+
+    // Ping healthcheck /fail on error
+    const healthcheckUrl = await getConfig("healthcheck_url");
+    if (healthcheckUrl) {
+      try { await fetch(`${healthcheckUrl}/fail`); } catch { /* ignore */ }
+    }
+
     return { success: false, logs };
   }
 }

@@ -30,7 +30,7 @@ const categories: { title: string; keys: string[] }[] = [
   },
   {
     title: "Schedule & UI",
-    keys: ["cron_schedule", "dashboard_refresh_ms"],
+    keys: ["cron_schedule", "dashboard_refresh_ms", "healthcheck_url"],
   },
 ];
 
