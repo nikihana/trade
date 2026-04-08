@@ -10,6 +10,7 @@ export function BotStatusBadge() {
     ? new Date(data.lastCheck).toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
+        timeZone: "America/Los_Angeles",
       })
     : null;
 

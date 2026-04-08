@@ -30,9 +30,12 @@ const categories: { title: string; keys: string[] }[] = [
   },
   {
     title: "Schedule & UI",
-    keys: ["cron_schedule", "dashboard_refresh_ms", "healthcheck_url"],
+    keys: ["cron_schedule", "dashboard_refresh_min", "healthcheck_url"],
   },
 ];
+
+// Keys where the input should be full-width below the label
+const fullWidthKeys = new Set(["healthcheck_url", "cron_schedule"]);
 
 export default function ConfigPage() {
   const [config, setConfig] = useState<ConfigRow[]>([]);
@@ -107,29 +110,54 @@ export default function ConfigPage() {
             {cat.keys.map((key) => {
               const row = configMap.get(key);
               if (!row) return null;
+              const isFullWidth = fullWidthKeys.has(key);
+
               return (
                 <div key={key} className="px-4 py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex-1 min-w-0">
+                  {isFullWidth ? (
+                    /* Full-width layout: label on top, input below */
+                    <div>
                       <label className="text-sm font-medium text-white block">
                         {row.label}
                       </label>
                       {row.description && (
-                        <p className="text-xs text-zinc-500 mt-0.5">
+                        <p className="text-xs text-zinc-500 mt-0.5 mb-2">
                           {row.description}
                         </p>
                       )}
+                      <input
+                        type="text"
+                        value={values[key] || ""}
+                        onChange={(e) =>
+                          setValues((v) => ({ ...v, [key]: e.target.value }))
+                        }
+                        className="w-full bg-zinc-900 border border-zinc-600 rounded-lg px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-blue-500 transition-colors"
+                      />
                     </div>
-                    <input
-                      type={row.type === "cron" ? "text" : "text"}
-                      inputMode={row.type === "cron" ? "text" : "decimal"}
-                      value={values[key] || ""}
-                      onChange={(e) =>
-                        setValues((v) => ({ ...v, [key]: e.target.value }))
-                      }
-                      className="w-28 bg-zinc-900 border border-zinc-600 rounded-lg px-3 py-2 text-sm text-white text-right font-mono focus:outline-none focus:border-blue-500 transition-colors"
-                    />
-                  </div>
+                  ) : (
+                    /* Inline layout: label left, input right */
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex-1 min-w-0">
+                        <label className="text-sm font-medium text-white block">
+                          {row.label}
+                        </label>
+                        {row.description && (
+                          <p className="text-xs text-zinc-500 mt-0.5">
+                            {row.description}
+                          </p>
+                        )}
+                      </div>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        value={values[key] || ""}
+                        onChange={(e) =>
+                          setValues((v) => ({ ...v, [key]: e.target.value }))
+                        }
+                        className="w-28 bg-zinc-900 border border-zinc-600 rounded-lg px-3 py-2 text-sm text-white text-right font-mono focus:outline-none focus:border-blue-500 transition-colors"
+                      />
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -158,7 +186,7 @@ export default function ConfigPage() {
       </button>
 
       <p className="text-xs text-zinc-600 text-center">
-        Note: Cron schedule changes require a Vercel redeploy to take effect.
+        All times shown in PST.
       </p>
     </div>
   );

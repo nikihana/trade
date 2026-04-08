@@ -89,6 +89,7 @@ export default function OptionsChainPage({
                     {new Date(c.expirationDate).toLocaleDateString("en-US", {
                       month: "short",
                       day: "numeric",
+                      timeZone: "America/Los_Angeles",
                     })}
                   </span>
                 </div>

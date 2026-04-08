@@ -53,7 +53,7 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
                 Exp{" "}
                 {new Date(ticker.openContract.expiration).toLocaleDateString(
                   "en-US",
-                  { month: "short", day: "numeric" }
+                  { month: "short", day: "numeric", timeZone: "America/Los_Angeles" }
                 )}
               </span>
             </div>

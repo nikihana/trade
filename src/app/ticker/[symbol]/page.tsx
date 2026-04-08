@@ -212,6 +212,7 @@ export default function TickerDetailPage({
                           {new Date(c.expiration).toLocaleDateString("en-US", {
                             month: "short",
                             day: "numeric",
+                            timeZone: "America/Los_Angeles",
                           })}
                         </span>
                         <span className="text-green-400">Premium: {fmt(c.premium)}</span>
@@ -319,8 +320,8 @@ export default function TickerDetailPage({
                     <div key={c.id} className="bg-zinc-800 rounded-xl p-4 border border-zinc-700">
                       <div className="flex justify-between">
                         <span className="text-sm text-zinc-400">
-                          {new Date(c.startedAt).toLocaleDateString()} →{" "}
-                          {new Date(c.completedAt).toLocaleDateString()}
+                          {new Date(c.startedAt).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })} →{" "}
+                          {new Date(c.completedAt).toLocaleDateString("en-US", { timeZone: "America/Los_Angeles" })}
                         </span>
                         <span className={`text-sm font-medium ${plColor(c.realizedPL)}`}>
                           {fmt(c.realizedPL)}
