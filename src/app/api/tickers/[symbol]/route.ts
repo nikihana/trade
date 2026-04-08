@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { sql } from "@/lib/db";
 
 export async function DELETE(
   _request: Request,
@@ -7,25 +7,9 @@ export async function DELETE(
 ) {
   try {
     const { symbol } = await params;
-
-    const ticker = await prisma.ticker.findUnique({
-      where: { symbol: symbol.toUpperCase() },
-    });
-
-    if (!ticker) {
-      return NextResponse.json({ error: "Ticker not found" }, { status: 404 });
-    }
-
-    await prisma.ticker.update({
-      where: { id: ticker.id },
-      data: { active: false },
-    });
-
+    await sql`UPDATE "Ticker" SET active = false WHERE symbol = ${symbol.toUpperCase()}`;
     return NextResponse.json({ success: true });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });
   }
 }

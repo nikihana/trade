@@ -1,17 +1,8 @@
-import { PrismaClient } from "@/generated/prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { neon } from "@neondatabase/serverless";
 
-const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
-};
+export const sql = neon(process.env.DATABASE_URL!);
 
-function createPrismaClient() {
-  const adapter = new PrismaPg(process.env.DATABASE_URL!);
-  return new PrismaClient({ adapter });
-}
-
-export const prisma = globalForPrisma.prisma ?? createPrismaClient();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+// Helper to generate cuid-like IDs
+export function genId(): string {
+  return crypto.randomUUID().replace(/-/g, "").slice(0, 25);
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { sql } from "@/lib/db";
 
 export async function GET(request: NextRequest) {
   try {
@@ -7,29 +7,21 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get("page") || "1");
     const limit = parseInt(searchParams.get("limit") || "50");
     const ticker = searchParams.get("ticker");
+    const offset = (page - 1) * limit;
 
-    const where = ticker ? { ticker: ticker.toUpperCase() } : {};
+    let trades, total;
+    if (ticker) {
+      trades = await sql`SELECT * FROM "TradeLog" WHERE ticker = ${ticker.toUpperCase()} ORDER BY timestamp DESC LIMIT ${limit} OFFSET ${offset}`;
+      const countResult = await sql`SELECT count(*)::int as count FROM "TradeLog" WHERE ticker = ${ticker.toUpperCase()}`;
+      total = countResult[0].count;
+    } else {
+      trades = await sql`SELECT * FROM "TradeLog" ORDER BY timestamp DESC LIMIT ${limit} OFFSET ${offset}`;
+      const countResult = await sql`SELECT count(*)::int as count FROM "TradeLog"`;
+      total = countResult[0].count;
+    }
 
-    const [trades, total] = await Promise.all([
-      prisma.tradeLog.findMany({
-        where,
-        orderBy: { timestamp: "desc" },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      prisma.tradeLog.count({ where }),
-    ]);
-
-    return NextResponse.json({
-      trades,
-      total,
-      page,
-      totalPages: Math.ceil(total / limit),
-    });
+    return NextResponse.json({ trades, total, page, totalPages: Math.ceil(total / limit) });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });
   }
 }

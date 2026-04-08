@@ -1,7 +1,7 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
-import { prisma } from "./db";
+import { sql } from "./db";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
@@ -14,20 +14,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email as string },
-        });
+        const rows = await sql`
+          SELECT id, email, name, "hashedPassword"
+          FROM "User"
+          WHERE email = ${credentials.email as string}
+        `;
+        const user = rows[0];
 
         if (!user || !user.hashedPassword) return null;
 
         const valid = await compare(
           credentials.password as string,
-          user.hashedPassword
+          user.hashedPassword as string
         );
 
         if (!valid) return null;
 
-        return { id: user.id, email: user.email, name: user.name };
+        return { id: user.id as string, email: user.email as string, name: user.name as string };
       },
     }),
   ],

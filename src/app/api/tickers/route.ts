@@ -1,112 +1,79 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
-import { WheelStage, ContractStatus } from "@/lib/types";
+import { sql, genId } from "@/lib/db";
 
 export async function GET() {
   try {
-    const tickers = await prisma.ticker.findMany({
-      where: { active: true },
-      include: {
-        cycles: {
-          where: { completedAt: null },
-          include: {
-            contracts: {
-              where: {
-                status: { in: [ContractStatus.OPEN, ContractStatus.PENDING] },
-              },
-            },
-          },
-          take: 1,
-        },
-      },
-      orderBy: { createdAt: "asc" },
-    });
+    const tickers = await sql`
+      SELECT t.id, t.symbol, t.active,
+        wc.id as "cycleId", wc.stage, wc."totalPremium", wc."costBasis", wc."sharesHeld"
+      FROM "Ticker" t
+      LEFT JOIN "WheelCycle" wc ON wc."tickerId" = t.id AND wc."completedAt" IS NULL
+      WHERE t.active = true
+      ORDER BY t."createdAt" ASC
+    `;
 
-    const result = tickers.map((t) => {
-      const cycle = t.cycles[0];
-      return {
+    const result = [];
+    for (const t of tickers) {
+      let openContract = null;
+      if (t.cycleId) {
+        const contracts = await sql`
+          SELECT type, "strikePrice", expiration, premium, status
+          FROM "Contract"
+          WHERE "cycleId" = ${t.cycleId} AND status IN ('OPEN', 'PENDING')
+          LIMIT 1
+        `;
+        openContract = contracts[0] || null;
+      }
+
+      result.push({
         id: t.id,
         symbol: t.symbol,
         active: t.active,
-        stage: cycle?.stage || null,
-        totalPremium: cycle?.totalPremium || 0,
-        costBasis: cycle?.costBasis,
-        sharesHeld: cycle?.sharesHeld || 0,
-        openContract: cycle?.contracts[0] || null,
-        cycleId: cycle?.id || null,
-      };
-    });
+        stage: t.stage || null,
+        totalPremium: Number(t.totalPremium) || 0,
+        costBasis: t.costBasis ? Number(t.costBasis) : null,
+        sharesHeld: Number(t.sharesHeld) || 0,
+        openContract,
+        cycleId: t.cycleId || null,
+      });
+    }
 
     return NextResponse.json(result);
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
     const { symbol } = await request.json();
-
     if (!symbol || typeof symbol !== "string") {
-      return NextResponse.json(
-        { error: "Symbol is required" },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: "Symbol is required" }, { status: 400 });
     }
 
     const upperSymbol = symbol.toUpperCase().trim();
 
-    // Check if already exists
-    const existing = await prisma.ticker.findUnique({
-      where: { symbol: upperSymbol },
-    });
+    const existing = await sql`SELECT id, active FROM "Ticker" WHERE symbol = ${upperSymbol}`;
 
-    if (existing) {
-      // Reactivate if inactive
-      if (!existing.active) {
-        await prisma.ticker.update({
-          where: { id: existing.id },
-          data: { active: true },
-        });
+    if (existing.length > 0) {
+      const ticker = existing[0];
+      if (!ticker.active) {
+        await sql`UPDATE "Ticker" SET active = true WHERE id = ${ticker.id}`;
       }
-
-      // Ensure there's an active cycle
-      const activeCycle = await prisma.wheelCycle.findFirst({
-        where: { tickerId: existing.id, completedAt: null },
-      });
-
-      if (!activeCycle) {
-        await prisma.wheelCycle.create({
-          data: {
-            tickerId: existing.id,
-            stage: WheelStage.SELLING_PUTS,
-          },
-        });
+      const activeCycle = await sql`SELECT id FROM "WheelCycle" WHERE "tickerId" = ${ticker.id} AND "completedAt" IS NULL`;
+      if (activeCycle.length === 0) {
+        await sql`INSERT INTO "WheelCycle" (id, "tickerId", stage, "totalPremium", "realizedPL", "sharesHeld") VALUES (${genId()}, ${ticker.id}, 'SELLING_PUTS', 0, 0, 0)`;
       }
-
-      return NextResponse.json({ id: existing.id, symbol: upperSymbol });
+      return NextResponse.json({ id: ticker.id, symbol: upperSymbol });
     }
 
-    // Create new ticker + initial cycle
-    const ticker = await prisma.ticker.create({
-      data: {
-        symbol: upperSymbol,
-        cycles: {
-          create: {
-            stage: WheelStage.SELLING_PUTS,
-          },
-        },
-      },
-    });
+    const tickerId = genId();
+    const cycleId = genId();
+    await sql`INSERT INTO "Ticker" (id, symbol, active) VALUES (${tickerId}, ${upperSymbol}, true)`;
+    await sql`INSERT INTO "WheelCycle" (id, "tickerId", stage, "totalPremium", "realizedPL", "sharesHeld") VALUES (${cycleId}, ${tickerId}, 'SELLING_PUTS', 0, 0, 0)`;
 
-    return NextResponse.json({ id: ticker.id, symbol: ticker.symbol });
+    return NextResponse.json({ id: tickerId, symbol: upperSymbol });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });
   }
 }

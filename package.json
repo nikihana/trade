@@ -4,25 +4,20 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npx prisma generate && next build",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "bot": "tsx src/bot/index.ts",
-    "bot:dev": "tsx watch src/bot/index.ts",
-    "db:push": "prisma db push",
-    "db:studio": "prisma studio",
-    "postinstall": "prisma generate"
+    "bot:dev": "tsx watch src/bot/index.ts"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "^7.7.0",
-    "@prisma/client": "^7.7.0",
+    "@neondatabase/serverless": "^1.0.2",
     "@types/bcryptjs": "^2.4.6",
     "bcryptjs": "^3.0.3",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
     "next": "16.2.2",
     "next-auth": "^5.0.0-beta.30",
-    "prisma": "^7.7.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "swr": "^2.4.1",

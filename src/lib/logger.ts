@@ -1,4 +1,4 @@
-import { prisma } from "./db";
+import { sql, genId } from "./db";
 import { LogLevel } from "./types";
 
 export async function log(
@@ -11,14 +11,10 @@ export async function log(
   const prefix = ticker ? `[${ticker}]` : "";
   console.log(`${timestamp.toISOString()} [${level}] ${prefix} ${message}`);
 
-  await prisma.tradeLog.create({
-    data: {
-      level,
-      message,
-      ticker,
-      data: data ? JSON.stringify(data) : null,
-    },
-  });
+  await sql`
+    INSERT INTO "TradeLog" (id, timestamp, level, message, ticker, data)
+    VALUES (${genId()}, ${timestamp}, ${level}, ${message}, ${ticker || null}, ${data ? JSON.stringify(data) : null})
+  `;
 }
 
 export const logInfo = (msg: string, ticker?: string, data?: Record<string, unknown>) =>

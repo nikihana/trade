@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { sql } from "@/lib/db";
 
 export async function GET(
   _request: Request,
@@ -8,27 +8,28 @@ export async function GET(
   try {
     const { symbol } = await params;
 
-    const ticker = await prisma.ticker.findUnique({
-      where: { symbol: symbol.toUpperCase() },
-    });
-
-    if (!ticker) {
+    const tickers = await sql`SELECT id FROM "Ticker" WHERE symbol = ${symbol.toUpperCase()}`;
+    if (tickers.length === 0) {
       return NextResponse.json({ error: "Ticker not found" }, { status: 404 });
     }
 
-    const cycles = await prisma.wheelCycle.findMany({
-      where: { tickerId: ticker.id },
-      include: {
-        contracts: { orderBy: { openedAt: "desc" } },
-      },
-      orderBy: { startedAt: "desc" },
-    });
+    const cycles = await sql`
+      SELECT * FROM "WheelCycle"
+      WHERE "tickerId" = ${tickers[0].id}
+      ORDER BY "startedAt" DESC
+    `;
+
+    for (const cycle of cycles) {
+      const contracts = await sql`
+        SELECT * FROM "Contract"
+        WHERE "cycleId" = ${cycle.id}
+        ORDER BY "openedAt" DESC
+      `;
+      cycle.contracts = contracts;
+    }
 
     return NextResponse.json(cycles);
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Unknown error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });
   }
 }
