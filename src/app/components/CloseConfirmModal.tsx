@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { mutate } from "swr";
+import { refreshAll } from "@/lib/hooks";
 
 function fmt(n: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
@@ -47,9 +47,7 @@ export function CloseConfirmModal({
       const data = await res.json();
       if (res.ok) {
         setResult("Positions closed successfully");
-        mutate("/api/tickers");
-        mutate("/api/portfolio");
-        mutate("/api/trades?page=1&limit=20&level=TRADE");
+        refreshAll();
         setTimeout(onClose, 1500);
       } else {
         setResult(data.error || "Failed to close");

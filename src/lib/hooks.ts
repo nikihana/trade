@@ -1,67 +1,61 @@
 "use client";
 
-import useSWR from "swr";
+import useSWR, { mutate } from "swr";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
-// Fetch config to get refresh interval
-export function useConfig() {
-  return useSWR("/api/config", fetcher, { refreshInterval: 60000 });
+/**
+ * Revalidate all dashboard data after a meaningful action.
+ * Call this after: closing a position, adding a position, running a tick/screen/morning check.
+ */
+export function refreshAll() {
+  mutate("/api/portfolio");
+  mutate("/api/tickers");
+  mutate("/api/candidates");
+  mutate("/api/summary");
+  mutate("/api/bot/status");
+  mutate("/api/regime");
+  // Trade logs use dynamic keys — revalidate all SWR keys matching trades
+  mutate((key: string) => typeof key === "string" && key.startsWith("/api/trades"), undefined, { revalidate: true });
 }
 
-function useRefreshMs() {
-  const { data } = useConfig();
-  if (!data || !Array.isArray(data)) return 30000;
-  const row = data.find((c: { key: string }) => c.key === "dashboard_refresh_min");
-  if (!row) return 30000;
-  return Math.max(parseFloat(row.value) * 60000, 5000); // min 5s
+export function useConfig() {
+  return useSWR("/api/config", fetcher);
 }
 
 export function usePortfolio() {
-  const ms = useRefreshMs();
-  return useSWR("/api/portfolio", fetcher, { refreshInterval: ms });
+  return useSWR("/api/portfolio", fetcher);
 }
 
 export function useTickers() {
-  const ms = useRefreshMs();
-  return useSWR("/api/tickers", fetcher, { refreshInterval: ms });
+  return useSWR("/api/tickers", fetcher);
 }
 
 export function useBotStatus() {
-  return useSWR("/api/bot/status", fetcher, { refreshInterval: 15000 });
+  return useSWR("/api/bot/status", fetcher);
 }
 
 export function useTrades(page = 1) {
-  const ms = useRefreshMs();
-  return useSWR(`/api/trades?page=${page}&limit=20`, fetcher, {
-    refreshInterval: ms,
-  });
+  return useSWR(`/api/trades?page=${page}&limit=20`, fetcher);
 }
 
 export function useSummary() {
-  const ms = useRefreshMs();
-  return useSWR("/api/summary", fetcher, { refreshInterval: ms * 2 });
+  return useSWR("/api/summary", fetcher);
 }
 
 export function useTickerCycles(symbol: string) {
-  const ms = useRefreshMs();
-  return useSWR(symbol ? `/api/tickers/${symbol}/cycles` : null, fetcher, {
-    refreshInterval: ms,
-  });
+  return useSWR(symbol ? `/api/tickers/${symbol}/cycles` : null, fetcher);
 }
 
 export function useTickerPositions(symbol: string) {
-  const ms = useRefreshMs();
   return useSWR(
     symbol ? `/api/tickers/${symbol}/positions` : null,
-    fetcher,
-    { refreshInterval: ms }
+    fetcher
   );
 }
 
 export function useCandidates() {
-  const ms = useRefreshMs();
-  return useSWR("/api/candidates", fetcher, { refreshInterval: ms * 4 });
+  return useSWR("/api/candidates", fetcher);
 }
 
 export function useOptionsChain(

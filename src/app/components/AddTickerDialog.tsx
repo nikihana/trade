@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { mutate } from "swr";
+import { refreshAll } from "@/lib/hooks";
 
 const strikeOptions = [
   { value: "30-delta", label: "30-delta (recommended)" },
@@ -45,8 +45,7 @@ export function AddTickerDialog() {
       setAllocation("");
       setStrikePreference("30-delta");
       setOpen(false);
-      mutate("/api/tickers");
-      mutate("/api/portfolio");
+      refreshAll();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {

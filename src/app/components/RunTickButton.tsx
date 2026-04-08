@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { mutate } from "swr";
+import { refreshAll } from "@/lib/hooks";
 
 function ActionButton({
   label,
@@ -28,11 +28,7 @@ function ActionButton({
       const res = await fetch(endpoint, { method });
       const data = await res.json();
       onResult({ success: data.success !== false, logs: data.logs || [data.error || "Done"] });
-
-      mutate("/api/tickers");
-      mutate("/api/portfolio");
-      mutate("/api/candidates");
-      mutate("/api/trades?page=1&limit=20&level=TRADE");
+      refreshAll();
     } catch (err) {
       onResult({
         success: false,
