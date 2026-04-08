@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql, genId } from "@/lib/db";
-import { getOptionQuote } from "@/lib/alpaca";
-import { checkTickerApproved, checkAvgVolume } from "@/lib/guards";
+import { getOptionQuote, getAccount } from "@/lib/alpaca";
+import { checkTickerApproved, checkAvgVolume, checkPremiumRichness, checkRiskCap } from "@/lib/guards";
+import { findBestPut } from "@/lib/options";
+import { getConfigNum } from "@/lib/config";
 
 export async function GET() {
   try {
@@ -45,6 +47,36 @@ export async function GET() {
       const premium = openContract ? openContract.premium : 0;
       const buyback = openContract ? openContract.buybackCost : 0;
 
+      // Check guards for pending tickers (no open contract)
+      let guardBlock: string | null = null;
+      if (!openContract) {
+        try {
+          const account = await getAccount();
+          const put = await findBestPut(t.symbol as string, (t.strikePreference as string) || "10pct-otm");
+          if (put) {
+            const pq = await getOptionQuote(put.symbol);
+            const putPremium = pq.midPrice * 100;
+            const posSize = put.strikePrice * 100;
+            const alloc = Number(t.allocation) || 0;
+
+            const premCheck = await checkPremiumRichness(putPremium, put.strikePrice);
+            if (!premCheck.allowed) {
+              guardBlock = premCheck.reason!;
+            } else if (alloc > 0 && posSize > alloc) {
+              guardBlock = `Position $${posSize.toLocaleString()} exceeds $${alloc.toLocaleString()} allocation`;
+            } else if (alloc <= 0 || posSize > alloc) {
+              const riskCheck = await checkRiskCap(put.strikePrice, account.equity, account.cash - posSize);
+              if (!riskCheck.allowed) guardBlock = riskCheck.reason!;
+            }
+
+            const minCashPct = await getConfigNum("min_cash_pct", 0.30);
+            if (!guardBlock && account.cash - posSize < account.equity * minCashPct) {
+              guardBlock = `Cash floor: $${(account.cash - posSize).toFixed(0)} below ${(minCashPct * 100).toFixed(0)}% of equity`;
+            }
+          }
+        } catch { /* skip guard check on error */ }
+      }
+
       result.push({
         id: t.id,
         symbol: t.symbol,
@@ -58,6 +90,7 @@ export async function GET() {
         openContract,
         cycleId: t.cycleId || null,
         livePL: premium > 0 ? Math.round((premium - buyback) * 100) / 100 : null,
+        guardBlock,
       });
     }
 

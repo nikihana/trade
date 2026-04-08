@@ -19,6 +19,7 @@ interface TickerData {
   allocation: number;
   strikePreference: string;
   livePL: number | null;
+  guardBlock: string | null;
   openContract: null | {
     type: string;
     strikePrice: number;

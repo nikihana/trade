@@ -17,6 +17,7 @@ interface TickerData {
   allocation: number;
   strikePreference: string;
   livePL: number | null;
+  guardBlock: string | null;
   openContract: {
     type: string;
     strikePrice: number;
@@ -65,6 +66,14 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
             <span className="text-[10px] text-zinc-600">
               {strikeLabels[ticker.strikePreference] || ticker.strikePreference}
             </span>
+            {ticker.guardBlock && (
+              <span
+                className="text-[10px] bg-red-900/50 text-red-400 px-1.5 py-0.5 rounded cursor-help"
+                title={ticker.guardBlock}
+              >
+                BLOCKED
+              </span>
+            )}
           </Link>
           <div className="flex items-center gap-2">
             {ticker.livePL !== null && (
