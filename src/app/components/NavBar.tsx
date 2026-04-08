@@ -27,13 +27,13 @@ export function NavBar() {
             <Link href="/" className="flex items-center gap-2">
               <Image
                 src="/logo.png"
-                alt="Wheel Trader"
+                alt="Predixeum"
                 width={28}
                 height={28}
                 className="rounded-md"
               />
               <span className="font-bold text-white text-sm">
-                Wheel Trader
+                Predixeum
               </span>
             </Link>
 

@@ -1,6 +1,6 @@
 {
-  "name": "Wheel Trader",
-  "short_name": "Wheel",
+  "name": "Predixeum",
+  "short_name": "Predixeum",
   "description": "Automated options wheel strategy dashboard",
   "start_url": "/",
   "display": "standalone",
