@@ -203,6 +203,31 @@ export async function submitOptionOrder(params: {
   });
 }
 
+// ── Multi-Leg Orders (Spreads) ───────────────────────────
+
+export async function submitMultiLegOrder(params: {
+  legs: {
+    symbol: string;
+    ratio_qty: number;
+    side: "buy" | "sell";
+    position_intent: "buy_to_open" | "sell_to_open" | "buy_to_close" | "sell_to_close";
+  }[];
+  type: "market" | "limit";
+  time_in_force: "day" | "gtc";
+  limit_price?: number;
+}) {
+  return api<Record<string, unknown>>("/v2/orders", {
+    method: "POST",
+    body: JSON.stringify({
+      order_class: "mleg",
+      legs: params.legs,
+      type: params.type,
+      time_in_force: params.time_in_force,
+      ...(params.limit_price && { limit_price: params.limit_price }),
+    }),
+  });
+}
+
 // ── Option Quote ─────────────────────────────────────────
 
 export async function getOptionQuote(

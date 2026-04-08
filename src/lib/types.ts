@@ -35,6 +35,36 @@ export enum CloseReason {
   STOP_LOSS = "STOP_LOSS",
 }
 
+// Market regimes
+export enum MarketRegime {
+  NORMAL = "NORMAL",
+  CAUTIOUS = "CAUTIOUS",
+  DEFENSIVE = "DEFENSIVE",
+  HALT = "HALT",
+  BEAR = "BEAR",
+}
+
+// Spread types
+export enum SpreadType {
+  BULL_PUT_SPREAD = "BULL_PUT_SPREAD",
+  BEAR_CALL_SPREAD = "BEAR_CALL_SPREAD",
+  IRON_CONDOR_PUT = "IRON_CONDOR_PUT",
+  IRON_CONDOR_CALL = "IRON_CONDOR_CALL",
+  SPY_HEDGE = "SPY_HEDGE",
+}
+
+// Regime detection result
+export interface RegimeResult {
+  regime: MarketRegime;
+  spyPrice: number;
+  sma50: number;
+  sma200: number;
+  vix: number;
+  spy52WeekHigh: number;
+  drawdownPct: number;
+  reason: string;
+}
+
 // Log levels
 export enum LogLevel {
   INFO = "INFO",

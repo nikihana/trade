@@ -4,6 +4,7 @@ import { PortfolioCard } from "./components/PortfolioCard";
 import { TickerCard } from "./components/TickerCard";
 import { AddTickerDialog } from "./components/AddTickerDialog";
 import { RunTickButton } from "./components/RunTickButton";
+import { RegimeBadge } from "./components/RegimeBadge";
 import { useTickers } from "@/lib/hooks";
 
 export default function Home() {
@@ -11,6 +12,9 @@ export default function Home() {
 
   return (
     <div className="space-y-6">
+      {/* Market regime */}
+      <RegimeBadge />
+
       {/* Portfolio overview */}
       <section>
         <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-3">

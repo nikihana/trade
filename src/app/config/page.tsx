@@ -47,6 +47,17 @@ const categories: { title: string; keys: string[] }[] = [
     ],
   },
   {
+    title: "Bear Market Protection",
+    keys: [
+      "vix_halt_threshold",
+      "bear_drop_pct",
+      "spread_width",
+      "hedge_pct",
+      "defensive_max_dte",
+      "cautious_size_pct",
+    ],
+  },
+  {
     title: "Schedule & UI",
     keys: ["cron_schedule", "dashboard_refresh_min", "healthcheck_url"],
   },
