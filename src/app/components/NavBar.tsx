@@ -9,6 +9,7 @@ const navItems = [
   { href: "/", label: "Dashboard" },
   { href: "/trades", label: "Trades" },
   { href: "/summary", label: "Summary" },
+  { href: "/config", label: "Config" },
 ];
 
 export function NavBar() {

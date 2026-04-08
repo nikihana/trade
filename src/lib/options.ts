@@ -1,44 +1,39 @@
 import { addWeeks, nextFriday, format, isFriday } from "date-fns";
 import { getOptionsContracts, getLatestQuote } from "./alpaca";
+import { getConfigNum } from "./config";
 import type { AlpacaOptionContract } from "./types";
 
 // ── Strike Selection ─────────────────────────────────────
 
-/**
- * Find the best put strike ~10% below current price
- */
-export function targetPutStrike(currentPrice: number): number {
-  return Math.round(currentPrice * 0.9);
+export async function targetPutStrike(currentPrice: number): Promise<number> {
+  const pct = await getConfigNum("put_strike_pct", 0.10);
+  return Math.round(currentPrice * (1 - pct));
 }
 
-/**
- * Find the best call strike ~10% above cost basis
- */
-export function targetCallStrike(costBasis: number): number {
-  const target = costBasis * 1.1;
+export async function targetCallStrike(costBasis: number): Promise<number> {
+  const pct = await getConfigNum("call_strike_pct", 0.10);
+  const target = costBasis * (1 + pct);
   return Math.ceil(target);
 }
 
 // ── Expiration Selection ─────────────────────────────────
 
-/**
- * Find the nearest Friday 2-4 weeks out (options typically expire on Fridays)
- */
-export function targetExpiration(now: Date = new Date()): {
+export async function targetExpiration(now: Date = new Date()): Promise<{
   minDate: string;
   maxDate: string;
   targetDate: string;
-} {
-  const twoWeeks = addWeeks(now, 2);
-  const fourWeeks = addWeeks(now, 4);
-  const threeWeeks = addWeeks(now, 3);
+}> {
+  const minWeeks = await getConfigNum("min_expiration_weeks", 2);
+  const maxWeeks = await getConfigNum("max_expiration_weeks", 4);
+  const targetWeeks = await getConfigNum("target_expiration_weeks", 3);
 
-  // Target: the Friday closest to 3 weeks out
-  let target = isFriday(threeWeeks) ? threeWeeks : nextFriday(threeWeeks);
+  const minOut = addWeeks(now, minWeeks);
+  const maxOut = addWeeks(now, maxWeeks);
+  const targetOut = addWeeks(now, targetWeeks);
 
-  // Clamp to range
-  const minFriday = isFriday(twoWeeks) ? twoWeeks : nextFriday(twoWeeks);
-  const maxFriday = isFriday(fourWeeks) ? fourWeeks : nextFriday(fourWeeks);
+  let target = isFriday(targetOut) ? targetOut : nextFriday(targetOut);
+  const minFriday = isFriday(minOut) ? minOut : nextFriday(minOut);
+  const maxFriday = isFriday(maxOut) ? maxOut : nextFriday(maxOut);
 
   if (target < minFriday) target = minFriday;
   if (target > maxFriday) target = maxFriday;
@@ -52,27 +47,24 @@ export function targetExpiration(now: Date = new Date()): {
 
 // ── Find Best Contract ───────────────────────────────────
 
-/**
- * Find the best put contract for the wheel strategy
- */
 export async function findBestPut(
   symbol: string
 ): Promise<AlpacaOptionContract | null> {
   const quote = await getLatestQuote(symbol);
-  const strike = targetPutStrike(quote.lastPrice);
-  const { minDate, maxDate } = targetExpiration();
+  const strike = await targetPutStrike(quote.lastPrice);
+  const { minDate, maxDate } = await targetExpiration();
+  const range = await getConfigNum("strike_range", 5);
 
   const contracts = await getOptionsContracts(symbol, {
     type: "put",
     expiration_date_gte: minDate,
     expiration_date_lte: maxDate,
-    strike_price_gte: String(strike - 5),
-    strike_price_lte: String(strike + 5),
+    strike_price_gte: String(strike - range),
+    strike_price_lte: String(strike + range),
   });
 
   if (contracts.length === 0) return null;
 
-  // Pick the one closest to our target strike
   contracts.sort(
     (a, b) =>
       Math.abs(a.strikePrice - strike) - Math.abs(b.strikePrice - strike)
@@ -81,27 +73,24 @@ export async function findBestPut(
   return contracts[0];
 }
 
-/**
- * Find the best call contract for covered calls
- */
 export async function findBestCall(
   symbol: string,
   costBasis: number
 ): Promise<AlpacaOptionContract | null> {
-  const strike = targetCallStrike(costBasis);
-  const { minDate, maxDate } = targetExpiration();
+  const strike = await targetCallStrike(costBasis);
+  const { minDate, maxDate } = await targetExpiration();
+  const range = await getConfigNum("strike_range", 5);
 
   const contracts = await getOptionsContracts(symbol, {
     type: "call",
     expiration_date_gte: minDate,
     expiration_date_lte: maxDate,
-    strike_price_gte: String(strike - 5),
-    strike_price_lte: String(strike + 5),
+    strike_price_gte: String(strike - range),
+    strike_price_lte: String(strike + range),
   });
 
   if (contracts.length === 0) return null;
 
-  // Pick the one closest to target strike, but never below cost basis
   const valid = contracts.filter((c) => c.strikePrice >= costBasis);
   if (valid.length === 0) return null;
 
@@ -113,9 +102,6 @@ export async function findBestCall(
   return valid[0];
 }
 
-/**
- * Get the current price for a symbol
- */
 export async function getCurrentPrice(symbol: string): Promise<number> {
   const quote = await getLatestQuote(symbol);
   return quote.lastPrice;
