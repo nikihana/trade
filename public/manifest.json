@@ -1,0 +1,21 @@
+{
+  "name": "Wheel Trader",
+  "short_name": "Wheel",
+  "description": "Automated options wheel strategy dashboard",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#18181b",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

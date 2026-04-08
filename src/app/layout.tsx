@@ -18,6 +18,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Wheel Trader",
   description: "Automated options wheel strategy dashboard",
+  manifest: "/manifest.json",
   icons: {
     icon: "/favicon-32.png",
     apple: "/apple-touch-icon.png",
