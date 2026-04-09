@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.000033 — 2026-04-09
+- Delete src/bot/ directory (dead code — everything runs via Vercel cron)
+- Remove bot/bot:dev scripts and tsx dependency from package.json
+
 ## v1.000032 — 2026-04-09
 - Remove all remaining polling (RegimeBadge 60s, Trades page 30s)
 - Zero background API calls — everything is action-triggered or page-load only
