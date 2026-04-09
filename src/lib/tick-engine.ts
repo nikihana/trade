@@ -23,29 +23,37 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
     if (override) log("⚠ OVERRIDE MODE — all guards bypassed");
 
     // ── 1b. Reconcile DB with Alpaca positions ──
-    // If Alpaca still has a short put we think is closed, reopen it in our DB
+    // For every short option on Alpaca, ensure our DB has it as OPEN with an active ticker
     const alpacaAllPositions = await getPositions();
-    const alpacaShortPuts = alpacaAllPositions.filter((p) => p.qty < 0 && p.symbol.includes("P"));
-    const dbClosedContracts = await sql`SELECT id, symbol, status FROM "Contract" WHERE status = 'CLOSED' AND "closedReason" = 'MANUAL'`;
+    const alpacaShortOptions = alpacaAllPositions.filter((p) => p.qty < 0);
 
-    for (const pos of alpacaShortPuts) {
-      const dbMatch = dbClosedContracts.find((c) => c.symbol === pos.symbol);
-      if (dbMatch) {
-        // DB says closed, Alpaca says still open — reopen in DB
-        log(`RECONCILE: ${pos.symbol} still open on Alpaca, reopening in DB`);
-        await sql`UPDATE "Contract" SET status = 'OPEN', "closedAt" = null, "closePrice" = null, "closedReason" = null WHERE id = ${dbMatch.id}`;
-        // Also reactivate the ticker
-        const contractInfo = await sql`
-          SELECT t.symbol FROM "Contract" c
-          JOIN "WheelCycle" wc ON wc.id = c."cycleId"
-          JOIN "Ticker" t ON t.id = wc."tickerId"
-          WHERE c.id = ${dbMatch.id}
-        `;
-        if (contractInfo.length > 0) {
-          await sql`UPDATE "Ticker" SET active = true WHERE symbol = ${contractInfo[0].symbol}`;
-          await sql`UPDATE "WheelCycle" SET "completedAt" = null WHERE "tickerId" IN (SELECT id FROM "Ticker" WHERE symbol = ${contractInfo[0].symbol}) AND "completedAt" IS NOT NULL`;
-        }
-        await logDb("WARN", `RECONCILE: ${pos.symbol} reopened — close order never filled on Alpaca`, contractInfo[0]?.symbol as string);
+    for (const pos of alpacaShortOptions) {
+      // Find matching contract in our DB
+      const dbContracts = await sql`
+        SELECT c.id, c.status, t.symbol as ticker, t.active as "tickerActive"
+        FROM "Contract" c
+        JOIN "WheelCycle" wc ON wc.id = c."cycleId"
+        JOIN "Ticker" t ON t.id = wc."tickerId"
+        WHERE c.symbol = ${pos.symbol}
+        ORDER BY c."openedAt" DESC LIMIT 1
+      `;
+
+      if (dbContracts.length === 0) continue; // unknown position, skip
+
+      const db = dbContracts[0];
+
+      // If DB says anything other than OPEN, but Alpaca still has it — reopen
+      if (db.status !== "OPEN") {
+        log(`RECONCILE: ${pos.symbol} is ${db.status} in DB but still open on Alpaca — reopening`);
+        await sql`UPDATE "Contract" SET status = 'OPEN', "closedAt" = null, "closePrice" = null, "closedReason" = null WHERE id = ${db.id}`;
+        await logDb("WARN", `RECONCILE: ${pos.symbol} reopened — Alpaca still holds position`, db.ticker as string);
+      }
+
+      // If ticker is deactivated but position still open — reactivate
+      if (!db.tickerActive) {
+        log(`RECONCILE: ${db.ticker} ticker inactive but position open — reactivating`);
+        await sql`UPDATE "Ticker" SET active = true WHERE symbol = ${db.ticker}`;
+        await sql`UPDATE "WheelCycle" SET "completedAt" = null WHERE "tickerId" IN (SELECT id FROM "Ticker" WHERE symbol = ${db.ticker})`;
       }
     }
 
