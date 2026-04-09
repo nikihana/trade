@@ -9,6 +9,7 @@ function ActionButton({
   endpoint,
   method = "POST",
   color,
+  body,
   onResult,
 }: {
   label: string;
@@ -16,6 +17,7 @@ function ActionButton({
   endpoint: string;
   method?: "POST" | "GET";
   color: string;
+  body?: Record<string, unknown>;
   onResult: (result: { success: boolean; logs: string[] }) => void;
 }) {
   const [loading, setLoading] = useState(false);
@@ -25,7 +27,10 @@ function ActionButton({
     onResult({ success: true, logs: [] });
 
     try {
-      const res = await fetch(endpoint, { method });
+      const res = await fetch(endpoint, {
+        method,
+        ...(body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}),
+      });
       const data = await res.json();
       onResult({ success: data.success !== false, logs: data.logs || [data.error || "Done"] });
       refreshAll();
@@ -43,6 +48,7 @@ function ActionButton({
     green: loading ? "bg-green-800 text-green-300 animate-pulse" : "bg-green-600 hover:bg-green-500 active:bg-green-700 text-white",
     blue: loading ? "bg-blue-800 text-blue-300 animate-pulse" : "bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white",
     purple: loading ? "bg-purple-800 text-purple-300 animate-pulse" : "bg-purple-600 hover:bg-purple-500 active:bg-purple-700 text-white",
+    yellow: loading ? "bg-yellow-700 text-yellow-200 animate-pulse" : "bg-yellow-600 hover:bg-yellow-500 active:bg-yellow-700 text-white",
   };
 
   return (
@@ -58,15 +64,27 @@ function ActionButton({
 
 export function RunTickButton() {
   const [result, setResult] = useState<{ success: boolean; logs: string[] } | null>(null);
+  const [override, setOverride] = useState(false);
 
   return (
     <div className="space-y-3">
+      <label className="flex items-center gap-2 text-xs text-zinc-500 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={override}
+          onChange={(e) => setOverride(e.target.checked)}
+          className="rounded border-zinc-600 bg-zinc-800 text-yellow-500 focus:ring-yellow-500"
+        />
+        Override guards (bypass risk caps, premium checks)
+      </label>
+
       <div className="flex gap-2">
         <ActionButton
-          label="Run Tick"
+          label={override ? "Run Tick ⚡" : "Run Tick"}
           loadingLabel="Running..."
           endpoint="/api/bot/tick"
-          color="green"
+          color={override ? "yellow" : "green"}
+          body={override ? { override: true } : undefined}
           onResult={setResult}
         />
         <ActionButton

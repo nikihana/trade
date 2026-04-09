@@ -8,7 +8,8 @@ import { findBullPutSpread, findBearCallSpread, findIronCondor, submitSpreadOrde
 import { checkStopLoss, checkPremiumRichness, checkRiskCap, checkCallPremium } from "./guards";
 import { MarketRegime, SpreadType } from "./types";
 
-export async function runTickEngine(): Promise<{ success: boolean; logs: string[] }> {
+export async function runTickEngine(opts?: { override?: boolean }): Promise<{ success: boolean; logs: string[] }> {
+  const override = opts?.override ?? false;
   const logs: string[] = [];
   const log = (msg: string) => { logs.push(msg); console.log(`[tick] ${msg}`); };
   const logDb = async (level: string, msg: string, ticker?: string, data?: Record<string, unknown>) => {
@@ -19,6 +20,7 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
     // ── 1. Snapshot ──
     const account = await logTickSnapshot();
     log(`Snapshot: cash=$${account.cash.toFixed(0)} equity=$${account.equity.toFixed(0)}`);
+    if (override) log("⚠ OVERRIDE MODE — all guards bypassed");
 
     // ── 2. Regime Detection (BEFORE any trades) ──
     const regime = await detectRegime();
@@ -103,7 +105,7 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
     }
 
     // ── 4. Regime-Aware Trade Dispatcher ──
-    if (regime.regime === MarketRegime.HALT) {
+    if (regime.regime === MarketRegime.HALT && !override) {
       log("HALT regime: No new trades — VIX too high");
     } else {
       const tickers = await sql`SELECT t.*, wc.id as "cycleId", wc.stage, wc."costBasis", wc."totalPremium" FROM "Ticker" t LEFT JOIN "WheelCycle" wc ON wc."tickerId" = t.id AND wc."completedAt" IS NULL WHERE t.active = true`;
@@ -128,7 +130,7 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
         if (stage === "SELLING_PUTS") {
           switch (regime.regime) {
             case MarketRegime.NORMAL:
-              await execNakedPut(symbol, cycleId, cashAvailable, account.equity, ticker.strikePreference as string, Number(ticker.allocation) || 0, log, logDb);
+              await execNakedPut(symbol, cycleId, cashAvailable, account.equity, ticker.strikePreference as string, Number(ticker.allocation) || 0, override, log, logDb);
               break;
 
             case MarketRegime.CAUTIOUS:
@@ -209,7 +211,7 @@ export async function runTickEngine(): Promise<{ success: boolean; logs: string[
 // ── Trade Execution Helpers ──────────────────────────────
 
 async function execNakedPut(
-  symbol: string, cycleId: string, cashAvailable: number, equity: number, strikePreference: string, allocation: number,
+  symbol: string, cycleId: string, cashAvailable: number, equity: number, strikePreference: string, allocation: number, override: boolean,
   log: (msg: string) => void, logDb: (level: string, msg: string, ticker?: string, data?: Record<string, unknown>) => Promise<void>
 ) {
   const put = await findBestPut(symbol, strikePreference);
@@ -220,23 +222,23 @@ async function execNakedPut(
   const premium = q.midPrice * 100;
   if (premium <= 0) { log(`${symbol}: No premium`); return; }
 
-  const premCheck = await checkPremiumRichness(premium, put.strikePrice);
-  if (!premCheck.allowed) { log(`${symbol}: GUARD — ${premCheck.reason}`); await logDb("WARN", premCheck.reason!, symbol); return; }
+  if (!override) {
+    const premCheck = await checkPremiumRichness(premium, put.strikePrice);
+    if (!premCheck.allowed) { log(`${symbol}: GUARD — ${premCheck.reason}`); await logDb("WARN", premCheck.reason!, symbol); return; }
 
-  // Per-ticker allocation overrides global risk cap
-  if (allocation > 0 && positionSize <= allocation) {
-    // Allocation set and position fits — skip global cap, just check cash floor
-    const minCashPct = await getConfigNum("min_cash_pct", 0.30);
-    const minCash = equity * minCashPct;
-    if (cashAvailable - positionSize < minCash) {
-      log(`${symbol}: GUARD — Cash after trade $${(cashAvailable - positionSize).toFixed(0)} below ${(minCashPct * 100).toFixed(0)}% floor ($${minCash.toFixed(0)})`);
-      await logDb("WARN", `Cash floor guard: $${(cashAvailable - positionSize).toFixed(0)} < $${minCash.toFixed(0)}`, symbol);
-      return;
+    // Per-ticker allocation overrides global risk cap
+    if (allocation > 0 && positionSize <= allocation) {
+      const minCashPct = await getConfigNum("min_cash_pct", 0.30);
+      const minCash = equity * minCashPct;
+      if (cashAvailable - positionSize < minCash) {
+        log(`${symbol}: GUARD — Cash after trade $${(cashAvailable - positionSize).toFixed(0)} below ${(minCashPct * 100).toFixed(0)}% floor ($${minCash.toFixed(0)})`);
+        await logDb("WARN", `Cash floor guard: $${(cashAvailable - positionSize).toFixed(0)} < $${minCash.toFixed(0)}`, symbol);
+        return;
+      }
+    } else {
+      const riskCheck = await checkRiskCap(put.strikePrice, equity, cashAvailable - positionSize);
+      if (!riskCheck.allowed) { log(`${symbol}: GUARD — ${riskCheck.reason}`); await logDb("WARN", riskCheck.reason!, symbol); return; }
     }
-  } else {
-    // No allocation or position exceeds allocation — use global risk cap
-    const riskCheck = await checkRiskCap(put.strikePrice, equity, cashAvailable - positionSize);
-    if (!riskCheck.allowed) { log(`${symbol}: GUARD — ${riskCheck.reason}`); await logDb("WARN", riskCheck.reason!, symbol); return; }
   }
 
   log(`${symbol}: SELL PUT ${put.symbol} $${put.strikePrice} prem=$${premium.toFixed(2)}`);
