@@ -46,7 +46,9 @@ export function CloseConfirmModal({
       });
       const data = await res.json();
       if (res.ok) {
-        setResult("Positions closed successfully");
+        setResult(data.pendingClose
+          ? "Close order queued — fills at market open 9:30 AM ET"
+          : "Positions closed successfully");
         refreshAll();
         setTimeout(onClose, 1500);
       } else {
