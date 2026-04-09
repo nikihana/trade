@@ -57,8 +57,20 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
       }
     }
 
-    // Check PENDING_CLOSE contracts — if Alpaca no longer holds them, they filled
     const alpacaSymbolSet = new Set(alpacaShortOptions.map((p) => p.symbol));
+
+    // Check PENDING sell orders — if Alpaca now holds the position, the order filled
+    const pendingSells = await sql`SELECT c.id, c.symbol, c.premium, c."cycleId" FROM "Contract" c WHERE c.status = 'PENDING' AND c.action = 'SELL_TO_OPEN'`;
+    for (const c of pendingSells) {
+      if (alpacaSymbolSet.has(c.symbol as string)) {
+        log(`RECONCILE: ${c.symbol} PENDING → OPEN (order filled)`);
+        await sql`UPDATE "Contract" SET status = 'OPEN' WHERE id = ${c.id}`;
+        await sql`UPDATE "WheelCycle" SET "totalPremium" = "totalPremium" + ${Number(c.premium)} WHERE id = ${c.cycleId}`;
+        await logDb("TRADE", `ORDER FILLED: ${c.symbol} | Premium: $${Number(c.premium).toFixed(2)}`, undefined);
+      }
+    }
+
+    // Check PENDING_CLOSE contracts — if Alpaca no longer holds them, they filled
     const pendingCloses = await sql`SELECT c.id, c.symbol, c.premium, c."closePrice", c."cycleId" FROM "Contract" c WHERE c.status = 'PENDING_CLOSE'`;
     for (const c of pendingCloses) {
       if (!alpacaSymbolSet.has(c.symbol as string)) {
@@ -309,9 +321,9 @@ async function execNakedPut(
 
   log(`${symbol}: SELL PUT ${put.symbol} $${put.strikePrice} prem=$${premium.toFixed(2)}`);
   const order = await submitOptionOrder({ symbol: put.symbol, qty: 1, side: "sell", type: "limit", time_in_force: "gtc", limit_price: q.bidPrice > 0 ? q.bidPrice : q.midPrice });
-  await sql`INSERT INTO "Contract" (id, "cycleId", type, action, symbol, "strikePrice", expiration, premium, quantity, status, "alpacaOrderId") VALUES (${genId()}, ${cycleId}, 'PUT', 'SELL_TO_OPEN', ${put.symbol}, ${put.strikePrice}, ${new Date(put.expirationDate)}, ${premium}, 1, 'OPEN', ${String(order.id || '')})`;
-  await sql`UPDATE "WheelCycle" SET "totalPremium" = "totalPremium" + ${premium} WHERE id = ${cycleId}`;
-  await logDb("TRADE", `SOLD PUT: ${put.symbol} | Strike: $${put.strikePrice} | Premium: $${premium.toFixed(2)}`, symbol);
+  await sql`INSERT INTO "Contract" (id, "cycleId", type, action, symbol, "strikePrice", expiration, premium, quantity, status, "alpacaOrderId") VALUES (${genId()}, ${cycleId}, 'PUT', 'SELL_TO_OPEN', ${put.symbol}, ${put.strikePrice}, ${new Date(put.expirationDate)}, ${premium}, 1, 'PENDING', ${String(order.id || '')})`;
+  // Premium added to cycle only after fill is confirmed (reconciliation)
+  await logDb("TRADE", `ORDER PLACED: ${put.symbol} | Strike: $${put.strikePrice} | Est Premium: $${premium.toFixed(2)} | Status: PENDING`, symbol);
 }
 
 async function execBullPutSpread(
@@ -327,9 +339,8 @@ async function execBullPutSpread(
 
   log(`${symbol}: BULL PUT SPREAD sell=${spread.sellLeg.symbol} buy=${spread.buyLeg.symbol} net=$${spread.netPremium.toFixed(2)}`);
   const order = await submitSpreadOrder(spread.sellLeg.symbol, spread.buyLeg.symbol, "put");
-  await sql`INSERT INTO "Contract" (id, "cycleId", type, action, symbol, "strikePrice", expiration, premium, quantity, status, "alpacaOrderId", "spreadType", "protectionSymbol", "protectionPremium") VALUES (${genId()}, ${cycleId}, 'PUT', 'SELL_TO_OPEN', ${spread.sellLeg.symbol}, ${spread.sellLeg.strikePrice}, ${new Date(spread.sellLeg.expirationDate)}, ${spread.netPremium}, 1, 'OPEN', ${String(order.id || '')}, ${SpreadType.BULL_PUT_SPREAD}, ${spread.buyLeg.symbol}, ${spread.buyPremium})`;
-  await sql`UPDATE "WheelCycle" SET "totalPremium" = "totalPremium" + ${spread.netPremium} WHERE id = ${cycleId}`;
-  await logDb("TRADE", `BULL PUT SPREAD: ${symbol} | Sell $${spread.sellLeg.strikePrice} / Buy $${spread.buyLeg.strikePrice} | Net: $${spread.netPremium.toFixed(2)} | MaxLoss: $${maxLoss.toFixed(2)}`, symbol);
+  await sql`INSERT INTO "Contract" (id, "cycleId", type, action, symbol, "strikePrice", expiration, premium, quantity, status, "alpacaOrderId", "spreadType", "protectionSymbol", "protectionPremium") VALUES (${genId()}, ${cycleId}, 'PUT', 'SELL_TO_OPEN', ${spread.sellLeg.symbol}, ${spread.sellLeg.strikePrice}, ${new Date(spread.sellLeg.expirationDate)}, ${spread.netPremium}, 1, 'PENDING', ${String(order.id || '')}, ${SpreadType.BULL_PUT_SPREAD}, ${spread.buyLeg.symbol}, ${spread.buyPremium})`;
+  await logDb("TRADE", `ORDER PLACED: BULL PUT SPREAD ${symbol} | Net: $${spread.netPremium.toFixed(2)} | PENDING`, symbol);
 }
 
 async function execBearCallSpread(
@@ -341,9 +352,8 @@ async function execBearCallSpread(
 
   log(`${symbol}: BEAR CALL SPREAD sell=${spread.sellLeg.symbol} buy=${spread.buyLeg.symbol} net=$${spread.netPremium.toFixed(2)}`);
   const order = await submitSpreadOrder(spread.sellLeg.symbol, spread.buyLeg.symbol, "call");
-  await sql`INSERT INTO "Contract" (id, "cycleId", type, action, symbol, "strikePrice", expiration, premium, quantity, status, "alpacaOrderId", "spreadType", "protectionSymbol", "protectionPremium") VALUES (${genId()}, ${cycleId}, 'CALL', 'SELL_TO_OPEN', ${spread.sellLeg.symbol}, ${spread.sellLeg.strikePrice}, ${new Date(spread.sellLeg.expirationDate)}, ${spread.netPremium}, 1, 'OPEN', ${String(order.id || '')}, ${SpreadType.BEAR_CALL_SPREAD}, ${spread.buyLeg.symbol}, ${spread.buyPremium})`;
-  await sql`UPDATE "WheelCycle" SET "totalPremium" = "totalPremium" + ${spread.netPremium} WHERE id = ${cycleId}`;
-  await logDb("TRADE", `BEAR CALL SPREAD: ${symbol} | Sell $${spread.sellLeg.strikePrice} / Buy $${spread.buyLeg.strikePrice} | Net: $${spread.netPremium.toFixed(2)}`, symbol);
+  await sql`INSERT INTO "Contract" (id, "cycleId", type, action, symbol, "strikePrice", expiration, premium, quantity, status, "alpacaOrderId", "spreadType", "protectionSymbol", "protectionPremium") VALUES (${genId()}, ${cycleId}, 'CALL', 'SELL_TO_OPEN', ${spread.sellLeg.symbol}, ${spread.sellLeg.strikePrice}, ${new Date(spread.sellLeg.expirationDate)}, ${spread.netPremium}, 1, 'PENDING', ${String(order.id || '')}, ${SpreadType.BEAR_CALL_SPREAD}, ${spread.buyLeg.symbol}, ${spread.buyPremium})`;
+  await logDb("TRADE", `ORDER PLACED: BEAR CALL SPREAD ${symbol} | Net: $${spread.netPremium.toFixed(2)} | PENDING`, symbol);
 }
 
 async function execIronCondor(
@@ -355,17 +365,15 @@ async function execIronCondor(
 
   // Submit put side
   const putOrder = await submitSpreadOrder(ic.putSpread.sellLeg.symbol, ic.putSpread.buyLeg.symbol, "put");
-  await sql`INSERT INTO "Contract" (id, "cycleId", type, action, symbol, "strikePrice", expiration, premium, quantity, status, "alpacaOrderId", "spreadType", "protectionSymbol", "protectionPremium") VALUES (${genId()}, ${cycleId}, 'PUT', 'SELL_TO_OPEN', ${ic.putSpread.sellLeg.symbol}, ${ic.putSpread.sellLeg.strikePrice}, ${new Date(ic.putSpread.sellLeg.expirationDate)}, ${ic.putSpread.netPremium}, 1, 'OPEN', ${String(putOrder.id || '')}, ${SpreadType.IRON_CONDOR_PUT}, ${ic.putSpread.buyLeg.symbol}, ${ic.putSpread.buyPremium})`;
+  await sql`INSERT INTO "Contract" (id, "cycleId", type, action, symbol, "strikePrice", expiration, premium, quantity, status, "alpacaOrderId", "spreadType", "protectionSymbol", "protectionPremium") VALUES (${genId()}, ${cycleId}, 'PUT', 'SELL_TO_OPEN', ${ic.putSpread.sellLeg.symbol}, ${ic.putSpread.sellLeg.strikePrice}, ${new Date(ic.putSpread.sellLeg.expirationDate)}, ${ic.putSpread.netPremium}, 1, 'PENDING', ${String(putOrder.id || '')}, ${SpreadType.IRON_CONDOR_PUT}, ${ic.putSpread.buyLeg.symbol}, ${ic.putSpread.buyPremium})`;
 
   // Submit call side
   const callOrder = await submitSpreadOrder(ic.callSpread.sellLeg.symbol, ic.callSpread.buyLeg.symbol, "call");
-  await sql`INSERT INTO "Contract" (id, "cycleId", type, action, symbol, "strikePrice", expiration, premium, quantity, status, "alpacaOrderId", "spreadType", "protectionSymbol", "protectionPremium") VALUES (${genId()}, ${cycleId}, 'CALL', 'SELL_TO_OPEN', ${ic.callSpread.sellLeg.symbol}, ${ic.callSpread.sellLeg.strikePrice}, ${new Date(ic.callSpread.sellLeg.expirationDate)}, ${ic.callSpread.netPremium}, 1, 'OPEN', ${String(callOrder.id || '')}, ${SpreadType.IRON_CONDOR_CALL}, ${ic.callSpread.buyLeg.symbol}, ${ic.callSpread.buyPremium})`;
+  await sql`INSERT INTO "Contract" (id, "cycleId", type, action, symbol, "strikePrice", expiration, premium, quantity, status, "alpacaOrderId", "spreadType", "protectionSymbol", "protectionPremium") VALUES (${genId()}, ${cycleId}, 'CALL', 'SELL_TO_OPEN', ${ic.callSpread.sellLeg.symbol}, ${ic.callSpread.sellLeg.strikePrice}, ${new Date(ic.callSpread.sellLeg.expirationDate)}, ${ic.callSpread.netPremium}, 1, 'PENDING', ${String(callOrder.id || '')}, ${SpreadType.IRON_CONDOR_CALL}, ${ic.callSpread.buyLeg.symbol}, ${ic.callSpread.buyPremium})`;
 
   const totalPremium = ic.putSpread.netPremium + ic.callSpread.netPremium;
-  await sql`UPDATE "WheelCycle" SET "totalPremium" = "totalPremium" + ${totalPremium} WHERE id = ${cycleId}`;
-
   log(`${symbol}: IRON CONDOR | Put: $${ic.putSpread.sellLeg.strikePrice}/$${ic.putSpread.buyLeg.strikePrice} | Call: $${ic.callSpread.sellLeg.strikePrice}/$${ic.callSpread.buyLeg.strikePrice} | Total: $${totalPremium.toFixed(2)}`);
-  await logDb("TRADE", `IRON CONDOR: ${symbol} | Net: $${totalPremium.toFixed(2)}`, symbol);
+  await logDb("TRADE", `ORDER PLACED: IRON CONDOR ${symbol} | Net: $${totalPremium.toFixed(2)} | PENDING`, symbol);
 }
 
 async function execCoveredCall(
@@ -383,7 +391,6 @@ async function execCoveredCall(
 
   log(`${symbol}: SELL CALL ${call.symbol} $${call.strikePrice} prem=$${premium.toFixed(2)}`);
   const order = await submitOptionOrder({ symbol: call.symbol, qty: 1, side: "sell", type: "limit", time_in_force: "gtc", limit_price: q.bidPrice > 0 ? q.bidPrice : q.midPrice });
-  await sql`INSERT INTO "Contract" (id, "cycleId", type, action, symbol, "strikePrice", expiration, premium, quantity, status, "alpacaOrderId") VALUES (${genId()}, ${cycleId}, 'CALL', 'SELL_TO_OPEN', ${call.symbol}, ${call.strikePrice}, ${new Date(call.expirationDate)}, ${premium}, 1, 'OPEN', ${String(order.id || '')})`;
-  await sql`UPDATE "WheelCycle" SET "totalPremium" = "totalPremium" + ${premium} WHERE id = ${cycleId}`;
-  await logDb("TRADE", `SOLD CALL: ${call.symbol} | Strike: $${call.strikePrice} | Premium: $${premium.toFixed(2)}`, symbol);
+  await sql`INSERT INTO "Contract" (id, "cycleId", type, action, symbol, "strikePrice", expiration, premium, quantity, status, "alpacaOrderId") VALUES (${genId()}, ${cycleId}, 'CALL', 'SELL_TO_OPEN', ${call.symbol}, ${call.strikePrice}, ${new Date(call.expirationDate)}, ${premium}, 1, 'PENDING', ${String(order.id || '')})`;
+  await logDb("TRADE", `ORDER PLACED: ${call.symbol} | Strike: $${call.strikePrice} | Est Premium: $${premium.toFixed(2)} | PENDING`, symbol);
 }
