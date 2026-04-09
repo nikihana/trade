@@ -17,9 +17,7 @@ function fmt(n: number) {
 }
 
 export function RegimeBadge() {
-  const { data, isLoading } = useSWR("/api/regime", fetcher, {
-    refreshInterval: 60000,
-  });
+  const { data, isLoading } = useSWR("/api/regime", fetcher);
 
   if (isLoading) {
     return <div className="bg-zinc-800 rounded-xl p-4 animate-pulse h-20" />;

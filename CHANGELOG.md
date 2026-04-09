@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.000032 — 2026-04-09
+- Remove all remaining polling (RegimeBadge 60s, Trades page 30s)
+- Zero background API calls — everything is action-triggered or page-load only
+
 ## v1.000031 — 2026-04-09
 - Remove dead dashboard_refresh_min config (polling was already removed)
 - Dashboard refreshes on: page load, tab focus, and after actions only

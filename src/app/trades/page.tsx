@@ -26,7 +26,7 @@ function PositionsTab() {
   const { data, isLoading } = useSWR(
     `/api/trades?page=${page}&limit=20&level=TICK`,
     fetcher,
-    { refreshInterval: 30000 }
+    {}
   );
 
   if (isLoading) return <Loading />;
@@ -122,7 +122,7 @@ function ActivityTab() {
   const { data, isLoading } = useSWR(
     `/api/trades?page=${page}&limit=20&level=TRADE`,
     fetcher,
-    { refreshInterval: 30000 }
+    {}
   );
 
   if (isLoading) return <Loading />;
