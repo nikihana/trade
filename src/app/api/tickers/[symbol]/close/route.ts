@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { sql, genId } from "@/lib/db";
-import { submitOptionOrder, getOptionQuote } from "@/lib/alpaca";
+import { submitOptionOrder, getOptionQuote, getOrder } from "@/lib/alpaca";
 
 /**
  * POST /api/tickers/[symbol]/close — Close all open contracts for this ticker
+ * Only marks DB as closed AFTER verifying the order was accepted by Alpaca.
  */
 export async function POST(
   _request: Request,
@@ -13,7 +14,6 @@ export async function POST(
     const { symbol } = await params;
     const upper = symbol.toUpperCase();
 
-    // Find all open contracts for this ticker
     const openContracts = await sql`
       SELECT c.* FROM "Contract" c
       JOIN "WheelCycle" wc ON wc.id = c."cycleId"
@@ -26,53 +26,64 @@ export async function POST(
     }
 
     const results = [];
+    let allSucceeded = true;
 
     for (const contract of openContracts) {
       try {
-        // Get current quote for cost estimate
         const quote = await getOptionQuote(contract.symbol as string);
         const closeCost = quote.midPrice * 100;
+        const limitPrice = quote.askPrice > 0 ? quote.askPrice : quote.midPrice;
 
-        // Buy to close
+        // Submit buy-to-close order
         const order = await submitOptionOrder({
           symbol: contract.symbol as string,
           qty: 1,
           side: "buy",
           type: "limit",
           time_in_force: "gtc",
-          limit_price: quote.askPrice > 0 ? quote.askPrice : quote.midPrice,
+          limit_price: limitPrice,
         });
 
-        // Update DB
-        await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${closeCost}, "closedReason" = 'MANUAL' WHERE id = ${contract.id}`;
-        await sql`INSERT INTO "TradeLog" (id, timestamp, level, ticker, message) VALUES (${genId()}, now(), 'TRADE', ${upper}, ${`MANUAL CLOSE: ${contract.symbol} | Cost: $${closeCost.toFixed(2)}`})`;
+        const orderId = String(order.id || "");
+        const orderStatus = String(order.status || "");
+
+        // Verify the order was accepted (not rejected)
+        if (orderStatus === "rejected" || orderStatus === "canceled") {
+          allSucceeded = false;
+          results.push({
+            symbol: contract.symbol,
+            error: `Order ${orderStatus}: ${order.status}`,
+          });
+          continue;
+        }
+
+        // Order accepted — mark DB as closed (status will be PENDING_CLOSE until filled)
+        await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${closeCost}, "closedReason" = 'MANUAL', "alpacaOrderId" = ${orderId} WHERE id = ${contract.id}`;
+        await sql`INSERT INTO "TradeLog" (id, timestamp, level, ticker, message) VALUES (${genId()}, now(), 'TRADE', ${upper}, ${`MANUAL CLOSE: ${contract.symbol} | Buy-to-close @ $${limitPrice.toFixed(2)} (${orderStatus}) | Order: ${orderId}`})`;
 
         results.push({
           symbol: contract.symbol,
           type: contract.type,
           strikePrice: contract.strikePrice,
           closeCost,
-          orderId: order.id,
+          orderId,
+          orderStatus,
         });
       } catch (err) {
-        results.push({
-          symbol: contract.symbol,
-          error: err instanceof Error ? err.message : "Failed to close",
-        });
+        allSucceeded = false;
+        const errMsg = err instanceof Error ? err.message : "Failed to close";
+        results.push({ symbol: contract.symbol, error: errMsg });
+        await sql`INSERT INTO "TradeLog" (id, timestamp, level, ticker, message) VALUES (${genId()}, now(), 'ERROR', ${upper}, ${`CLOSE FAILED: ${contract.symbol} — ${errMsg}`})`;
       }
     }
 
-    // Deactivate the ticker so it disappears from the dashboard
-    await sql`UPDATE "Ticker" SET active = false WHERE symbol = ${upper}`;
+    // Only deactivate ticker if ALL closes succeeded
+    if (allSucceeded) {
+      await sql`UPDATE "Ticker" SET active = false WHERE symbol = ${upper}`;
+      await sql`UPDATE "WheelCycle" SET "completedAt" = now() WHERE "tickerId" IN (SELECT id FROM "Ticker" WHERE symbol = ${upper}) AND "completedAt" IS NULL`;
+    }
 
-    // Complete any open wheel cycles
-    await sql`
-      UPDATE "WheelCycle" SET "completedAt" = now()
-      WHERE "tickerId" IN (SELECT id FROM "Ticker" WHERE symbol = ${upper})
-      AND "completedAt" IS NULL
-    `;
-
-    return NextResponse.json({ closed: results });
+    return NextResponse.json({ closed: results, allSucceeded });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
@@ -82,7 +93,7 @@ export async function POST(
 }
 
 /**
- * GET /api/tickers/[symbol]/close — Preview what would be closed (for confirmation modal)
+ * GET /api/tickers/[symbol]/close — Preview what would be closed
  */
 export async function GET(
   _request: Request,
@@ -100,7 +111,6 @@ export async function GET(
       WHERE t.symbol = ${upper} AND c.status IN ('OPEN', 'PENDING')
     `;
 
-    // Get current quotes for cost estimates
     const contracts = [];
     for (const c of openContracts) {
       let estimatedCost = 0;

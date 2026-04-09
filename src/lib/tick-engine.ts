@@ -22,6 +22,33 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
     log(`Snapshot: cash=$${account.cash.toFixed(0)} equity=$${account.equity.toFixed(0)}`);
     if (override) log("⚠ OVERRIDE MODE — all guards bypassed");
 
+    // ── 1b. Reconcile DB with Alpaca positions ──
+    // If Alpaca still has a short put we think is closed, reopen it in our DB
+    const alpacaAllPositions = await getPositions();
+    const alpacaShortPuts = alpacaAllPositions.filter((p) => p.qty < 0 && p.symbol.includes("P"));
+    const dbClosedContracts = await sql`SELECT id, symbol, status FROM "Contract" WHERE status = 'CLOSED' AND "closedReason" = 'MANUAL'`;
+
+    for (const pos of alpacaShortPuts) {
+      const dbMatch = dbClosedContracts.find((c) => c.symbol === pos.symbol);
+      if (dbMatch) {
+        // DB says closed, Alpaca says still open — reopen in DB
+        log(`RECONCILE: ${pos.symbol} still open on Alpaca, reopening in DB`);
+        await sql`UPDATE "Contract" SET status = 'OPEN', "closedAt" = null, "closePrice" = null, "closedReason" = null WHERE id = ${dbMatch.id}`;
+        // Also reactivate the ticker
+        const contractInfo = await sql`
+          SELECT t.symbol FROM "Contract" c
+          JOIN "WheelCycle" wc ON wc.id = c."cycleId"
+          JOIN "Ticker" t ON t.id = wc."tickerId"
+          WHERE c.id = ${dbMatch.id}
+        `;
+        if (contractInfo.length > 0) {
+          await sql`UPDATE "Ticker" SET active = true WHERE symbol = ${contractInfo[0].symbol}`;
+          await sql`UPDATE "WheelCycle" SET "completedAt" = null WHERE "tickerId" IN (SELECT id FROM "Ticker" WHERE symbol = ${contractInfo[0].symbol}) AND "completedAt" IS NOT NULL`;
+        }
+        await logDb("WARN", `RECONCILE: ${pos.symbol} reopened — close order never filled on Alpaca`, contractInfo[0]?.symbol as string);
+      }
+    }
+
     // ── 2. Regime Detection (BEFORE any trades) ──
     const regime = await detectRegime();
     log(`REGIME: ${regime.regime} — ${regime.reason}`);
