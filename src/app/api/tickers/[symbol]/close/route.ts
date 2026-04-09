@@ -1,11 +1,8 @@
 import { NextResponse } from "next/server";
 import { sql, genId } from "@/lib/db";
-import { submitOptionOrder, getOptionQuote, getOrder } from "@/lib/alpaca";
+import { submitOptionOrder, getOptionQuote } from "@/lib/alpaca";
+import { isMarketHours } from "@/lib/utils";
 
-/**
- * POST /api/tickers/[symbol]/close — Close all open contracts for this ticker
- * Only marks DB as closed AFTER verifying the order was accepted by Alpaca.
- */
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ symbol: string }> }
@@ -15,7 +12,7 @@ export async function POST(
     const upper = symbol.toUpperCase();
 
     const openContracts = await sql`
-      SELECT c.* FROM "Contract" c
+      SELECT c.*, wc.id as "wheelCycleId" FROM "Contract" c
       JOIN "WheelCycle" wc ON wc.id = c."cycleId"
       JOIN "Ticker" t ON t.id = wc."tickerId"
       WHERE t.symbol = ${upper} AND c.status IN ('OPEN', 'PENDING')
@@ -25,16 +22,19 @@ export async function POST(
       return NextResponse.json({ error: "No open contracts to close" }, { status: 400 });
     }
 
+    const marketOpen = isMarketHours();
     const results = [];
     let allSucceeded = true;
+    let totalRealizedPL = 0;
 
     for (const contract of openContracts) {
       try {
         const quote = await getOptionQuote(contract.symbol as string);
-        const closeCost = quote.midPrice * 100;
+        const closeCost = Math.round(quote.midPrice * 100 * 100) / 100;
         const limitPrice = quote.askPrice > 0 ? quote.askPrice : quote.midPrice;
+        const premium = Number(contract.premium);
+        const netPL = Math.round((premium - closeCost) * 100) / 100;
 
-        // Submit buy-to-close order
         const order = await submitOptionOrder({
           symbol: contract.symbol as string,
           qty: 1,
@@ -47,27 +47,34 @@ export async function POST(
         const orderId = String(order.id || "");
         const orderStatus = String(order.status || "");
 
-        // Verify the order was accepted (not rejected)
         if (orderStatus === "rejected" || orderStatus === "canceled") {
           allSucceeded = false;
-          results.push({
-            symbol: contract.symbol,
-            error: `Order ${orderStatus}: ${order.status}`,
-          });
+          results.push({ symbol: contract.symbol, error: `Order ${orderStatus}` });
           continue;
         }
 
-        // Order accepted — mark DB as closed (status will be PENDING_CLOSE until filled)
-        await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${closeCost}, "closedReason" = 'MANUAL', "alpacaOrderId" = ${orderId} WHERE id = ${contract.id}`;
-        await sql`INSERT INTO "TradeLog" (id, timestamp, level, ticker, message) VALUES (${genId()}, now(), 'TRADE', ${upper}, ${`MANUAL CLOSE: ${contract.symbol} | Buy-to-close @ $${limitPrice.toFixed(2)} (${orderStatus}) | Order: ${orderId}`})`;
+        if (marketOpen && (orderStatus === "filled" || orderStatus === "partially_filled")) {
+          // Filled immediately during market hours — mark CLOSED with P&L
+          await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${closeCost}, "closedReason" = 'MANUAL', "alpacaOrderId" = ${orderId} WHERE id = ${contract.id}`;
+          totalRealizedPL += netPL;
+        } else {
+          // After hours or not yet filled — mark PENDING_CLOSE
+          await sql`UPDATE "Contract" SET status = 'PENDING_CLOSE', "closePrice" = ${closeCost}, "closedReason" = 'MANUAL', "alpacaOrderId" = ${orderId} WHERE id = ${contract.id}`;
+        }
+
+        const statusLabel = marketOpen ? "CLOSED" : "PENDING_CLOSE (fills at market open 9:30 AM ET)";
+        await sql`INSERT INTO "TradeLog" (id, timestamp, level, ticker, message) VALUES (${genId()}, now(), 'TRADE', ${upper}, ${`CLOSE: ${contract.symbol} | Cost: $${closeCost} | Net P&L: $${netPL.toFixed(2)} | ${statusLabel}`})`;
 
         results.push({
           symbol: contract.symbol,
           type: contract.type,
           strikePrice: contract.strikePrice,
+          premium,
           closeCost,
+          netPL,
           orderId,
           orderStatus,
+          pendingClose: !marketOpen,
         });
       } catch (err) {
         allSucceeded = false;
@@ -77,13 +84,19 @@ export async function POST(
       }
     }
 
-    // Only deactivate ticker if ALL closes succeeded
-    if (allSucceeded) {
+    // Update realized P&L on the wheel cycle
+    if (totalRealizedPL !== 0) {
+      const cycleId = openContracts[0].wheelCycleId;
+      await sql`UPDATE "WheelCycle" SET "realizedPL" = "realizedPL" + ${totalRealizedPL} WHERE id = ${cycleId}`;
+    }
+
+    // Only deactivate ticker if ALL closes fully succeeded (not pending)
+    if (allSucceeded && marketOpen) {
       await sql`UPDATE "Ticker" SET active = false WHERE symbol = ${upper}`;
       await sql`UPDATE "WheelCycle" SET "completedAt" = now() WHERE "tickerId" IN (SELECT id FROM "Ticker" WHERE symbol = ${upper}) AND "completedAt" IS NULL`;
     }
 
-    return NextResponse.json({ closed: results, allSucceeded });
+    return NextResponse.json({ closed: results, allSucceeded, pendingClose: !marketOpen });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
@@ -92,9 +105,6 @@ export async function POST(
   }
 }
 
-/**
- * GET /api/tickers/[symbol]/close — Preview what would be closed
- */
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ symbol: string }> }
@@ -108,7 +118,7 @@ export async function GET(
       FROM "Contract" c
       JOIN "WheelCycle" wc ON wc.id = c."cycleId"
       JOIN "Ticker" t ON t.id = wc."tickerId"
-      WHERE t.symbol = ${upper} AND c.status IN ('OPEN', 'PENDING')
+      WHERE t.symbol = ${upper} AND c.status IN ('OPEN', 'PENDING', 'PENDING_CLOSE')
     `;
 
     const contracts = [];
@@ -130,7 +140,7 @@ export async function GET(
       });
     }
 
-    return NextResponse.json({ symbol: upper, contracts });
+    return NextResponse.json({ symbol: upper, contracts, marketOpen: isMarketHours() });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },

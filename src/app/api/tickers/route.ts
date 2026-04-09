@@ -1,12 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql, genId } from "@/lib/db";
-import { getOptionQuote, getAccount } from "@/lib/alpaca";
+import { getOptionQuote, getAccount, getPositions, getOrders } from "@/lib/alpaca";
 import { checkTickerApproved, checkAvgVolume, checkPremiumRichness, checkRiskCap } from "@/lib/guards";
 import { findBestPut } from "@/lib/options";
 import { getConfigNum } from "@/lib/config";
 
 export async function GET() {
   try {
+    // Lightweight reconciliation on page load
+    try {
+      const alpacaPositions = await getPositions();
+      const alpacaSymbols = new Set(
+        alpacaPositions.filter((p) => p.qty < 0).map((p) => p.symbol)
+      );
+
+      // Check PENDING_CLOSE contracts — if Alpaca no longer holds them, they filled
+      const pendingCloses = await sql`
+        SELECT c.id, c.symbol, c.premium, c."closePrice", c."cycleId"
+        FROM "Contract" c WHERE c.status = 'PENDING_CLOSE'
+      `;
+      for (const c of pendingCloses) {
+        if (!alpacaSymbols.has(c.symbol as string)) {
+          // Position gone — close order filled
+          const netPL = Number(c.premium) - Number(c.closePrice || 0);
+          await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now() WHERE id = ${c.id}`;
+          await sql`UPDATE "WheelCycle" SET "realizedPL" = "realizedPL" + ${netPL}, "completedAt" = now() WHERE id = ${c.cycleId}`;
+          // Deactivate ticker
+          await sql`UPDATE "Ticker" SET active = false WHERE id IN (SELECT "tickerId" FROM "WheelCycle" WHERE id = ${c.cycleId})`;
+        }
+      }
+    } catch { /* don't block page load if reconciliation fails */ }
+
     const tickers = await sql`
       SELECT t.id, t.symbol, t.active, t.allocation, t."strikePreference",
         wc.id as "cycleId", wc.stage, wc."totalPremium", wc."costBasis", wc."sharesHeld"
@@ -23,7 +47,7 @@ export async function GET() {
         const contracts = await sql`
           SELECT id, type, "strikePrice", expiration, premium, status, symbol as "optionSymbol", "closedReason"
           FROM "Contract"
-          WHERE "cycleId" = ${t.cycleId} AND status IN ('OPEN', 'PENDING')
+          WHERE "cycleId" = ${t.cycleId} AND status IN ('OPEN', 'PENDING', 'PENDING_CLOSE')
           LIMIT 1
         `;
         if (contracts[0]) {

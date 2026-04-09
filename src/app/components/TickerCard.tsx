@@ -116,6 +116,13 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
           </div>
         </div>
 
+        {/* Pending close banner */}
+        {ticker.openContract?.status === "PENDING_CLOSE" && (
+          <div className="bg-yellow-900/30 border border-yellow-800 rounded-lg px-3 py-2 mb-2 text-xs text-yellow-300">
+            Pending close — executes at market open 9:30 AM ET
+          </div>
+        )}
+
         {/* Failed close warning */}
         {ticker.openContract?.closedReason === "FAILED_CLOSE" && (
           <div className="bg-red-900/30 border border-red-800 rounded-lg px-3 py-2 mb-2 text-xs text-red-300">
@@ -150,10 +157,12 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
                 className={`px-2 py-0.5 rounded-full ${
                   ticker.openContract.status === "OPEN"
                     ? "bg-blue-900 text-blue-300"
-                    : "bg-yellow-900 text-yellow-300"
+                    : ticker.openContract.status === "PENDING_CLOSE"
+                      ? "bg-yellow-900 text-yellow-300"
+                      : "bg-zinc-700 text-zinc-300"
                 }`}
               >
-                {ticker.openContract.status}
+                {ticker.openContract.status === "PENDING_CLOSE" ? "CLOSING" : ticker.openContract.status}
               </span>
             </div>
           </div>

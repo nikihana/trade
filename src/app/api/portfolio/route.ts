@@ -4,14 +4,17 @@ import { sql } from "@/lib/db";
 
 export async function GET() {
   try {
-    const [account, positions, cycles] = await Promise.all([
+    const [account, positions, activeCycles, allCycles] = await Promise.all([
       getAccount(),
       getPositions(),
-      sql`SELECT "totalPremium", "realizedPL" FROM "WheelCycle"`,
+      // Premium from open positions only
+      sql`SELECT "totalPremium" FROM "WheelCycle" WHERE "completedAt" IS NULL`,
+      // Realized P&L from all completed cycles
+      sql`SELECT "realizedPL" FROM "WheelCycle" WHERE "completedAt" IS NOT NULL`,
     ]);
 
-    const totalPremium = cycles.reduce((s, c) => s + Number(c.totalPremium), 0);
-    const totalRealizedPL = cycles.reduce((s, c) => s + Number(c.realizedPL), 0);
+    const totalPremium = activeCycles.reduce((s, c) => s + Number(c.totalPremium), 0);
+    const totalRealizedPL = allCycles.reduce((s, c) => s + Number(c.realizedPL), 0);
 
     return NextResponse.json({ account, positions, totalPremium, totalRealizedPL });
   } catch (error) {

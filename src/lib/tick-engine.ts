@@ -42,7 +42,8 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
       const db = dbContracts[0];
 
       // DB says closed but Alpaca still holds it — close FAILED
-      if (db.status !== "OPEN" && db.status !== "PENDING") {
+      // (PENDING_CLOSE is expected — that's an after-hours order waiting to fill)
+      if (db.status !== "OPEN" && db.status !== "PENDING" && db.status !== "PENDING_CLOSE") {
         log(`RECONCILE: ${pos.symbol} marked ${db.status} in DB but Alpaca still holds it — marking FAILED_CLOSE`);
         await sql`UPDATE "Contract" SET status = 'OPEN', "closedAt" = null, "closePrice" = null, "closedReason" = 'FAILED_CLOSE' WHERE id = ${db.id}`;
         await logDb("ERROR", `CLOSE FAILED: ${pos.symbol} still open on Alpaca — needs manual resolution`, db.ticker as string);
@@ -53,6 +54,20 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
         await sql`UPDATE "Ticker" SET active = true WHERE symbol = ${db.ticker}`;
         await sql`UPDATE "WheelCycle" SET "completedAt" = null WHERE "tickerId" IN (SELECT id FROM "Ticker" WHERE symbol = ${db.ticker})`;
         log(`RECONCILE: ${db.ticker} reactivated — position still open, needs attention`);
+      }
+    }
+
+    // Check PENDING_CLOSE contracts — if Alpaca no longer holds them, they filled
+    const alpacaSymbolSet = new Set(alpacaShortOptions.map((p) => p.symbol));
+    const pendingCloses = await sql`SELECT c.id, c.symbol, c.premium, c."closePrice", c."cycleId" FROM "Contract" c WHERE c.status = 'PENDING_CLOSE'`;
+    for (const c of pendingCloses) {
+      if (!alpacaSymbolSet.has(c.symbol as string)) {
+        const netPL = Number(c.premium) - Number(c.closePrice || 0);
+        log(`RECONCILE: ${c.symbol} PENDING_CLOSE filled — P&L: $${netPL.toFixed(2)}`);
+        await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now() WHERE id = ${c.id}`;
+        await sql`UPDATE "WheelCycle" SET "realizedPL" = "realizedPL" + ${netPL}, "completedAt" = now() WHERE id = ${c.cycleId}`;
+        await sql`UPDATE "Ticker" SET active = false WHERE id IN (SELECT "tickerId" FROM "WheelCycle" WHERE id = ${c.cycleId})`;
+        await logDb("TRADE", `CLOSE FILLED: ${c.symbol} | P&L: $${netPL.toFixed(2)}`, undefined);
       }
     }
 
