@@ -149,6 +149,15 @@ export async function getOptionsContracts(
   }));
 }
 
+// ── Liquidate Position ───────────────────────────────────
+
+export async function liquidatePosition(symbolOrAssetId: string) {
+  return api<Record<string, unknown>>(
+    `/v2/positions/${encodeURIComponent(symbolOrAssetId)}`,
+    { method: "DELETE" }
+  );
+}
+
 // ── Orders ───────────────────────────────────────────────
 
 interface OrderParams {

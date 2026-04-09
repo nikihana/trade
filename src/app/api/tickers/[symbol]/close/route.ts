@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { sql, genId } from "@/lib/db";
-import { submitOptionOrder, getOptionQuote } from "@/lib/alpaca";
-import { isMarketHours } from "@/lib/utils";
+import { liquidatePosition, getOptionQuote } from "@/lib/alpaca";
 
 export async function POST(
   _request: Request,
@@ -15,55 +14,37 @@ export async function POST(
       SELECT c.*, wc.id as "wheelCycleId" FROM "Contract" c
       JOIN "WheelCycle" wc ON wc.id = c."cycleId"
       JOIN "Ticker" t ON t.id = wc."tickerId"
-      WHERE t.symbol = ${upper} AND c.status IN ('OPEN', 'PENDING')
+      WHERE t.symbol = ${upper} AND c.status IN ('OPEN', 'PENDING', 'PENDING_CLOSE')
     `;
 
     if (openContracts.length === 0) {
       return NextResponse.json({ error: "No open contracts to close" }, { status: 400 });
     }
 
-    const marketOpen = isMarketHours();
     const results = [];
     let allSucceeded = true;
     let totalRealizedPL = 0;
 
     for (const contract of openContracts) {
       try {
-        const quote = await getOptionQuote(contract.symbol as string);
-        const closeCost = Math.round(quote.midPrice * 100 * 100) / 100;
-        const limitPrice = quote.askPrice > 0 ? quote.askPrice : quote.midPrice;
+        // Get quote for P&L estimate
+        let closeCost = 0;
+        try {
+          const quote = await getOptionQuote(contract.symbol as string);
+          closeCost = Math.round(quote.midPrice * 100 * 100) / 100;
+        } catch { /* if quote fails, cost stays 0 */ }
+
         const premium = Number(contract.premium);
         const netPL = Math.round((premium - closeCost) * 100) / 100;
 
-        const order = await submitOptionOrder({
-          symbol: contract.symbol as string,
-          qty: 1,
-          side: "buy",
-          type: "limit",
-          time_in_force: "gtc",
-          limit_price: limitPrice,
-        });
+        // Liquidate via Alpaca — works during and outside market hours
+        const result = await liquidatePosition(contract.symbol as string);
 
-        const orderId = String(order.id || "");
-        const orderStatus = String(order.status || "");
+        // Mark as closed in DB
+        await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${closeCost}, "closedReason" = 'MANUAL' WHERE id = ${contract.id}`;
+        totalRealizedPL += netPL;
 
-        if (orderStatus === "rejected" || orderStatus === "canceled") {
-          allSucceeded = false;
-          results.push({ symbol: contract.symbol, error: `Order ${orderStatus}` });
-          continue;
-        }
-
-        if (marketOpen && (orderStatus === "filled" || orderStatus === "partially_filled")) {
-          // Filled immediately during market hours — mark CLOSED with P&L
-          await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${closeCost}, "closedReason" = 'MANUAL', "alpacaOrderId" = ${orderId} WHERE id = ${contract.id}`;
-          totalRealizedPL += netPL;
-        } else {
-          // After hours or not yet filled — mark PENDING_CLOSE
-          await sql`UPDATE "Contract" SET status = 'PENDING_CLOSE', "closePrice" = ${closeCost}, "closedReason" = 'MANUAL', "alpacaOrderId" = ${orderId} WHERE id = ${contract.id}`;
-        }
-
-        const statusLabel = marketOpen ? "CLOSED" : "PENDING_CLOSE (fills at market open 9:30 AM ET)";
-        await sql`INSERT INTO "TradeLog" (id, timestamp, level, ticker, message) VALUES (${genId()}, now(), 'TRADE', ${upper}, ${`CLOSE: ${contract.symbol} | Cost: $${closeCost} | Net P&L: $${netPL.toFixed(2)} | ${statusLabel}`})`;
+        await sql`INSERT INTO "TradeLog" (id, timestamp, level, ticker, message) VALUES (${genId()}, now(), 'TRADE', ${upper}, ${`LIQUIDATED: ${contract.symbol} | Cost: ~$${closeCost.toFixed(2)} | P&L: $${netPL.toFixed(2)}`})`;
 
         results.push({
           symbol: contract.symbol,
@@ -72,31 +53,28 @@ export async function POST(
           premium,
           closeCost,
           netPL,
-          orderId,
-          orderStatus,
-          pendingClose: !marketOpen,
         });
       } catch (err) {
         allSucceeded = false;
         const errMsg = err instanceof Error ? err.message : "Failed to close";
         results.push({ symbol: contract.symbol, error: errMsg });
-        await sql`INSERT INTO "TradeLog" (id, timestamp, level, ticker, message) VALUES (${genId()}, now(), 'ERROR', ${upper}, ${`CLOSE FAILED: ${contract.symbol} — ${errMsg}`})`;
+        await sql`INSERT INTO "TradeLog" (id, timestamp, level, ticker, message) VALUES (${genId()}, now(), 'ERROR', ${upper}, ${`LIQUIDATE FAILED: ${contract.symbol} — ${errMsg}`})`;
       }
     }
 
-    // Update realized P&L on the wheel cycle
+    // Update realized P&L
     if (totalRealizedPL !== 0) {
       const cycleId = openContracts[0].wheelCycleId;
       await sql`UPDATE "WheelCycle" SET "realizedPL" = "realizedPL" + ${totalRealizedPL} WHERE id = ${cycleId}`;
     }
 
-    // Only deactivate ticker if ALL closes fully succeeded (not pending)
-    if (allSucceeded && marketOpen) {
+    // Deactivate if all succeeded
+    if (allSucceeded) {
       await sql`UPDATE "Ticker" SET active = false WHERE symbol = ${upper}`;
       await sql`UPDATE "WheelCycle" SET "completedAt" = now() WHERE "tickerId" IN (SELECT id FROM "Ticker" WHERE symbol = ${upper}) AND "completedAt" IS NULL`;
     }
 
-    return NextResponse.json({ closed: results, allSucceeded, pendingClose: !marketOpen });
+    return NextResponse.json({ closed: results, allSucceeded });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
@@ -140,7 +118,7 @@ export async function GET(
       });
     }
 
-    return NextResponse.json({ symbol: upper, contracts, marketOpen: isMarketHours() });
+    return NextResponse.json({ symbol: upper, contracts });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
