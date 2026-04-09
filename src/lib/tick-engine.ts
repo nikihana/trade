@@ -1,5 +1,5 @@
 import { sql, genId } from "./db";
-import { getPositions, getLatestQuote, submitOptionOrder, getOptionQuote } from "./alpaca";
+import { getPositions, getLatestQuote, submitOptionOrder, getOptionQuote, getOrders } from "./alpaca";
 import { findBestPut, findBestCall } from "./options";
 import { getConfig, getConfigNum } from "./config";
 import { logTickSnapshot } from "./tick-snapshot";
@@ -111,6 +111,19 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
       const tickers = await sql`SELECT t.*, wc.id as "cycleId", wc.stage, wc."costBasis", wc."totalPremium" FROM "Ticker" t LEFT JOIN "WheelCycle" wc ON wc."tickerId" = t.id AND wc."completedAt" IS NULL WHERE t.active = true`;
       let cashAvailable = account.cash;
 
+      // Get all open orders from Alpaca to prevent duplicates
+      const alpacaOpenOrders = await getOrders("open", 100);
+      const openOrderSymbols = new Set(
+        (alpacaOpenOrders as { symbol?: string }[])
+          .map((o) => {
+            const sym = String(o.symbol || "");
+            // Extract underlying from OCC symbol (e.g. AMD260424P00210000 → AMD)
+            const match = sym.match(/^([A-Z]+)\d/);
+            return match ? match[1] : sym;
+          })
+          .filter(Boolean)
+      );
+
       for (const ticker of tickers) {
         const symbol = ticker.symbol as string;
         let cycleId = ticker.cycleId as string | null;
@@ -122,7 +135,10 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
         }
 
         const open = await sql`SELECT id, type FROM "Contract" WHERE "cycleId" = ${cycleId} AND status IN ('OPEN', 'PENDING')`;
-        if (open.length > 0) { log(`${symbol}: Open ${open[0].type}, skipping`); continue; }
+        if (open.length > 0) { log(`${symbol}: Open ${open[0].type} contract, skipping`); continue; }
+
+        // Check Alpaca for pending orders on this symbol (prevents duplicates for GTC limit orders)
+        if (openOrderSymbols.has(symbol)) { log(`${symbol}: Open order on Alpaca, skipping`); continue; }
 
         const stage = ticker.stage as string || "SELLING_PUTS";
 
