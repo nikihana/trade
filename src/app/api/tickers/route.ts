@@ -21,7 +21,7 @@ export async function GET() {
       let openContract = null;
       if (t.cycleId) {
         const contracts = await sql`
-          SELECT id, type, "strikePrice", expiration, premium, status, symbol as "optionSymbol"
+          SELECT id, type, "strikePrice", expiration, premium, status, symbol as "optionSymbol", "closedReason"
           FROM "Contract"
           WHERE "cycleId" = ${t.cycleId} AND status IN ('OPEN', 'PENDING')
           LIMIT 1
@@ -40,6 +40,7 @@ export async function GET() {
             premium: Number(c.premium),
             status: c.status,
             buybackCost,
+            closedReason: c.closedReason,
           };
         }
       }

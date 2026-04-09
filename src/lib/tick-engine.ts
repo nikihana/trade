@@ -23,12 +23,12 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
     if (override) log("⚠ OVERRIDE MODE — all guards bypassed");
 
     // ── 1b. Reconcile DB with Alpaca positions ──
-    // For every short option on Alpaca, ensure our DB has it as OPEN with an active ticker
+    // Flag mismatches — if Alpaca holds a position our DB thinks is closed,
+    // mark it as FAILED_CLOSE so it shows in Pending for manual resolution.
     const alpacaAllPositions = await getPositions();
     const alpacaShortOptions = alpacaAllPositions.filter((p) => p.qty < 0);
 
     for (const pos of alpacaShortOptions) {
-      // Find matching contract in our DB
       const dbContracts = await sql`
         SELECT c.id, c.status, t.symbol as ticker, t.active as "tickerActive"
         FROM "Contract" c
@@ -38,22 +38,21 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
         ORDER BY c."openedAt" DESC LIMIT 1
       `;
 
-      if (dbContracts.length === 0) continue; // unknown position, skip
-
+      if (dbContracts.length === 0) continue;
       const db = dbContracts[0];
 
-      // If DB says anything other than OPEN, but Alpaca still has it — reopen
-      if (db.status !== "OPEN") {
-        log(`RECONCILE: ${pos.symbol} is ${db.status} in DB but still open on Alpaca — reopening`);
-        await sql`UPDATE "Contract" SET status = 'OPEN', "closedAt" = null, "closePrice" = null, "closedReason" = null WHERE id = ${db.id}`;
-        await logDb("WARN", `RECONCILE: ${pos.symbol} reopened — Alpaca still holds position`, db.ticker as string);
+      // DB says closed but Alpaca still holds it — close FAILED
+      if (db.status !== "OPEN" && db.status !== "PENDING") {
+        log(`RECONCILE: ${pos.symbol} marked ${db.status} in DB but Alpaca still holds it — marking FAILED_CLOSE`);
+        await sql`UPDATE "Contract" SET status = 'OPEN', "closedAt" = null, "closePrice" = null, "closedReason" = 'FAILED_CLOSE' WHERE id = ${db.id}`;
+        await logDb("ERROR", `CLOSE FAILED: ${pos.symbol} still open on Alpaca — needs manual resolution`, db.ticker as string);
       }
 
-      // If ticker is deactivated but position still open — reactivate
+      // Reactivate ticker so it appears in dashboard (Pending section, since close failed)
       if (!db.tickerActive) {
-        log(`RECONCILE: ${db.ticker} ticker inactive but position open — reactivating`);
         await sql`UPDATE "Ticker" SET active = true WHERE symbol = ${db.ticker}`;
         await sql`UPDATE "WheelCycle" SET "completedAt" = null WHERE "tickerId" IN (SELECT id FROM "Ticker" WHERE symbol = ${db.ticker})`;
+        log(`RECONCILE: ${db.ticker} reactivated — position still open, needs attention`);
       }
     }
 

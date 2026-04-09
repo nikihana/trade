@@ -25,6 +25,7 @@ interface TickerData {
     premium: number;
     status: string;
     buybackCost?: number;
+    closedReason?: string;
   } | null;
 }
 
@@ -114,6 +115,13 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
             )}
           </div>
         </div>
+
+        {/* Failed close warning */}
+        {ticker.openContract?.closedReason === "FAILED_CLOSE" && (
+          <div className="bg-red-900/30 border border-red-800 rounded-lg px-3 py-2 mb-2 text-xs text-red-300">
+            Close failed — position still open on Alpaca. Try closing again during market hours.
+          </div>
+        )}
 
         {/* Stage indicator */}
         <WheelStageIndicator currentStage={ticker.stage} />

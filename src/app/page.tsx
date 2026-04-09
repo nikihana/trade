@@ -27,6 +27,7 @@ interface TickerData {
     premium: number;
     status: string;
     buybackCost?: number;
+    closedReason?: string;
   };
 }
 
