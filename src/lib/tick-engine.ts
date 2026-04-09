@@ -143,7 +143,7 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
       log("HALT regime: No new trades — VIX too high");
     } else {
       const tickers = await sql`SELECT t.*, wc.id as "cycleId", wc.stage, wc."costBasis", wc."totalPremium" FROM "Ticker" t LEFT JOIN "WheelCycle" wc ON wc."tickerId" = t.id AND wc."completedAt" IS NULL WHERE t.active = true`;
-      let cashAvailable = Math.min(account.cash, account.buyingPower);
+      let cashAvailable = Math.min(account.cash, account.optionsBuyingPower);
 
       // Get all open orders from Alpaca to prevent duplicates
       const alpacaOpenOrders = await getOrders("open", 100);

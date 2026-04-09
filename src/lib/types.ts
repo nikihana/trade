@@ -78,6 +78,7 @@ export interface AlpacaAccount {
   id: string;
   cash: number;
   buyingPower: number;
+  optionsBuyingPower: number;
   equity: number;
   portfolioValue: number;
 }

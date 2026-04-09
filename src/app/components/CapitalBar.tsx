@@ -18,7 +18,7 @@ export function CapitalBar() {
   if (!tickers || !portfolio?.account) return null;
 
   const equity = portfolio.account.equity;
-  const buyingPower = portfolio.account.buyingPower;
+  const buyingPower = portfolio.account.optionsBuyingPower;
   const deployed = equity - buyingPower;
   const pct = equity > 0 ? (deployed / equity) * 100 : 0;
 

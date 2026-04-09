@@ -40,6 +40,7 @@ export async function getAccount(): Promise<AlpacaAccount> {
     id: data.id,
     cash: parseFloat(data.cash),
     buyingPower: parseFloat(data.buying_power),
+    optionsBuyingPower: parseFloat(data.options_buying_power || data.buying_power),
     equity: parseFloat(data.equity),
     portfolioValue: parseFloat(data.portfolio_value),
   };
