@@ -109,7 +109,7 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
       log("HALT regime: No new trades — VIX too high");
     } else {
       const tickers = await sql`SELECT t.*, wc.id as "cycleId", wc.stage, wc."costBasis", wc."totalPremium" FROM "Ticker" t LEFT JOIN "WheelCycle" wc ON wc."tickerId" = t.id AND wc."completedAt" IS NULL WHERE t.active = true`;
-      let cashAvailable = account.cash;
+      let cashAvailable = Math.min(account.cash, account.buyingPower);
 
       // Get all open orders from Alpaca to prevent duplicates
       const alpacaOpenOrders = await getOrders("open", 100);
@@ -233,7 +233,8 @@ async function execNakedPut(
   const put = await findBestPut(symbol, strikePreference);
   if (!put) { log(`${symbol}: No put found`); return; }
   const positionSize = put.strikePrice * 100;
-  if (cashAvailable < positionSize) { log(`${symbol}: Not enough cash`); return; }
+  if (positionSize > equity * 0.5) { log(`${symbol}: Position $${positionSize.toLocaleString()} exceeds 50% of equity — too large for this account`); return; }
+  if (cashAvailable < positionSize) { log(`${symbol}: Not enough cash ($${cashAvailable.toFixed(0)} < $${positionSize.toLocaleString()})`); return; }
   const q = await getOptionQuote(put.symbol);
   const premium = q.midPrice * 100;
   if (premium <= 0) { log(`${symbol}: No premium`); return; }
