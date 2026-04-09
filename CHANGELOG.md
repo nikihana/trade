@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.000031 — 2026-04-09
+- Remove dead dashboard_refresh_min config (polling was already removed)
+- Dashboard refreshes on: page load, tab focus, and after actions only
+
 ## v1.000030 — 2026-04-09
 - Pending open/close banners: blue "Pending open" for unfilled sell orders, yellow "Pending close" for queued close orders
 - Status badges: OPENING (blue), OPEN (green), CLOSING (yellow)
