@@ -73,7 +73,7 @@ export async function getHistoricalBars(
   const data = await api<{
     bars: { t: string; o: number; h: number; l: number; c: number; v: number }[];
   }>(
-    `/v2/stocks/${symbol}/bars?timeframe=${timeframe}&limit=${limit}&feed=iex&sort=asc`,
+    `/v2/stocks/${symbol}/bars?timeframe=${timeframe}&limit=${limit}&sort=asc`,
     undefined,
     DATA_URL
   );
@@ -93,7 +93,7 @@ export async function getLatestQuote(
   symbol: string
 ): Promise<{ lastPrice: number; bidPrice: number; askPrice: number }> {
   const data = await api<Record<string, Record<string, number>>>(
-    `/v2/stocks/${symbol}/quotes/latest?feed=iex`,
+    `/v2/stocks/${symbol}/quotes/latest`,
     undefined,
     DATA_URL
   );

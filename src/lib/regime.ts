@@ -1,4 +1,4 @@
-import { getHistoricalBars } from "./alpaca";
+import { getHistoricalBars, getLatestQuote } from "./alpaca";
 import { getConfigNum } from "./config";
 import { fetchVix } from "./vix";
 import { MarketRegime } from "./types";
@@ -13,13 +13,26 @@ export async function detectRegime(): Promise<RegimeResult> {
   const bearDropPct = await getConfigNum("bear_drop_pct", 0.20);
 
   // Fetch data in parallel
-  const [bars, vix] = await Promise.all([
-    getHistoricalBars("SPY", { limit: 260 }),
-    fetchVix(),
-  ]);
+  let bars: { timestamp: string; open: number; high: number; low: number; close: number; volume: number }[] = [];
+  let vix = 20;
 
-  // Compute SMAs
-  const spyPrice = bars.length > 0 ? bars[bars.length - 1].close : 0;
+  try {
+    [bars, vix] = await Promise.all([
+      getHistoricalBars("SPY", { limit: 260 }),
+      fetchVix(),
+    ]);
+  } catch {
+    vix = await fetchVix();
+  }
+
+  // SPY price — use bars if available, fallback to live quote
+  let spyPrice = bars.length > 0 ? bars[bars.length - 1].close : 0;
+  if (spyPrice === 0) {
+    try {
+      const q = await getLatestQuote("SPY");
+      spyPrice = q.lastPrice;
+    } catch { /* leave at 0 */ }
+  }
 
   const sma50 =
     bars.length >= 50
