@@ -78,14 +78,6 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
             )}
           </Link>
           <div className="flex items-center gap-2">
-            {ticker.livePL !== null && (
-              <span className={`text-sm font-bold ${ticker.livePL >= 0 ? "text-green-400" : "text-red-400"}`}>
-                {ticker.livePL >= 0 ? "+" : ""}{fmt(ticker.livePL)}
-              </span>
-            )}
-            <span className="text-zinc-500 text-xs">
-              {fmt(ticker.totalPremium)} prem
-            </span>
             <button
               onClick={(e) => { e.preventDefault(); setShowEdit(true); }}
               className="text-xs text-zinc-500 hover:text-blue-400 transition-colors px-1.5 py-0.5 rounded hover:bg-blue-900/20"
@@ -142,70 +134,84 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
         <WheelStageIndicator currentStage={ticker.stage} />
 
         {/* Open contract */}
-        {ticker.openContract && (
-          <div className="mt-3 bg-zinc-900 rounded-lg p-3 text-xs">
-            {/* Option status line */}
-            {(() => {
-              const strike = Number(ticker.openContract.strikePrice);
-              const price = ticker.stockPrice;
-              const isPut = ticker.openContract.type === "PUT";
-              const itm = isPut ? price < strike : price > strike;
-              const diff = isPut ? strike - price : price - strike;
-              const pctFromStrike = strike > 0 ? Math.abs(diff / strike * 100) : 0;
+        {ticker.openContract && (() => {
+          const strike = Number(ticker.openContract.strikePrice);
+          const price = ticker.stockPrice;
+          const isPut = ticker.openContract.type === "PUT";
+          const itm = isPut ? price < strike : price > strike;
+          const pctFromStrike = strike > 0 ? Math.abs((strike - price) / strike * 100) : 0;
+          const premium = ticker.openContract.premium;
+          const buyback = ticker.openContract.buybackCost || 0;
+          const closeNowPL = premium > 0 ? premium - buyback : 0;
+          const isPending = ticker.openContract.status === "PENDING";
+          const isClosing = ticker.openContract.status === "PENDING_CLOSE";
 
-              return (
-                <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${itm ? "bg-red-500" : "bg-green-500"}`} />
-                    <span className={`text-xs font-medium ${itm ? "text-red-400" : "text-green-400"}`}>
-                      {itm ? "ITM" : "OTM"} — {isPut ? "Put" : "Call"} ${strike}
-                    </span>
-                  </div>
-                  <span className="text-xs text-zinc-500">
-                    Stock ${price.toFixed(2)} ({pctFromStrike.toFixed(1)}% {itm ? "in" : "out"})
+          return (
+            <div className="mt-3 bg-zinc-900 rounded-lg p-3 text-xs space-y-2">
+              {/* Status + ITM/OTM */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${itm ? "bg-red-500" : "bg-green-500"}`} />
+                  <span className={`font-medium ${itm ? "text-red-400" : "text-green-400"}`}>
+                    {isPut ? "Put" : "Call"} ${strike} · {itm ? "ITM" : "OTM"} {pctFromStrike.toFixed(1)}%
                   </span>
                 </div>
-              );
-            })()}
-
-            <div className="flex justify-between text-zinc-400">
-              <span>
-                Exp{" "}
-                {new Date(ticker.openContract.expiration).toLocaleDateString(
-                  "en-US",
-                  { month: "short", day: "numeric", timeZone: "America/Los_Angeles" }
-                )}
-              </span>
-              {ticker.openContract.buybackCost !== undefined && ticker.openContract.buybackCost > 0 && (
-                <span className="text-zinc-500">
-                  Mid ${(ticker.openContract.buybackCost / 100).toFixed(2)}
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                    isClosing ? "bg-yellow-900 text-yellow-300"
+                    : isPending ? "bg-blue-900 text-blue-300"
+                    : "bg-green-900 text-green-300"
+                  }`}
+                >
+                  {isClosing ? "CLOSING" : isPending ? "OPENING" : "OPEN"}
                 </span>
+              </div>
+
+              {/* Stock price + expiry */}
+              <div className="flex justify-between text-zinc-500">
+                <span>Stock ${price.toFixed(2)}</span>
+                <span>
+                  Exp{" "}
+                  {new Date(ticker.openContract.expiration).toLocaleDateString(
+                    "en-US",
+                    { month: "short", day: "numeric", timeZone: "America/Los_Angeles" }
+                  )}
+                </span>
+              </div>
+
+              {/* P&L breakdown — "if I close now" */}
+              {!isPending && (
+                <div className="border-t border-zinc-800 pt-2 space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Collected</span>
+                    <span className="text-green-400">+{fmt(premium)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">To close now</span>
+                    <span className="text-red-300">-{fmt(buyback)}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-zinc-800 pt-1">
+                    <span className="text-white font-medium">Net if closed</span>
+                    <span className={`font-bold ${closeNowPL >= 0 ? "text-green-400" : "text-red-400"}`}>
+                      {closeNowPL >= 0 ? "+" : ""}{fmt(closeNowPL)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Pending — no P&L yet */}
+              {isPending && (
+                <div className="border-t border-zinc-800 pt-2">
+                  <div className="flex justify-between">
+                    <span className="text-zinc-400">Est. premium</span>
+                    <span className="text-zinc-500">{fmt(premium)}</span>
+                  </div>
+                  <p className="text-zinc-600 mt-1">No premium collected until order fills</p>
+                </div>
               )}
             </div>
-            <div className="flex justify-between mt-1">
-              <span className="text-green-400">
-                Premium: {fmt(ticker.openContract.premium)}
-              </span>
-              <span
-                className={`px-2 py-0.5 rounded-full ${
-                  ticker.openContract.status === "OPEN"
-                    ? "bg-green-900 text-green-300"
-                    : ticker.openContract.status === "PENDING"
-                      ? "bg-blue-900 text-blue-300"
-                      : ticker.openContract.status === "PENDING_CLOSE"
-                        ? "bg-yellow-900 text-yellow-300"
-                        : "bg-zinc-700 text-zinc-300"
-                }`}
-              >
-                {ticker.openContract.status === "PENDING_CLOSE"
-                  ? "CLOSING"
-                  : ticker.openContract.status === "PENDING"
-                    ? "OPENING"
-                    : ticker.openContract.status}
-              </span>
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Shares held */}
         {ticker.sharesHeld > 0 && (

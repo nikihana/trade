@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.000035 — 2026-04-11
+- Clear P&L breakdown on each position: Collected / To close now / Net if closed
+- Green = in profit, red = at a loss — instant visual
+- PENDING orders show "Est. premium" with note "No premium collected until order fills"
+- Removed confusing livePL number from card header
+- ITM/OTM indicator with % distance from strike
+
 ## v1.000034 — 2026-04-11
 - Option status indicator: green dot + OTM or red dot + ITM on each contract
 - Shows stock price vs strike with % distance
