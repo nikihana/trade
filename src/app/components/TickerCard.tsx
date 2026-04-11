@@ -17,6 +17,7 @@ interface TickerData {
   allocation: number;
   strikePreference: string;
   livePL: number | null;
+  stockPrice: number;
   guardBlock: string | null;
   openContract: {
     type: string;
@@ -119,14 +120,14 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
         {/* Pending open banner */}
         {ticker.openContract?.status === "PENDING" && (
           <div className="bg-blue-900/30 border border-blue-800 rounded-lg px-3 py-2 mb-2 text-xs text-blue-300">
-            Pending open — executes at market open 9:30 AM ET
+            Limit sell order open — waiting to fill
           </div>
         )}
 
         {/* Pending close banner */}
         {ticker.openContract?.status === "PENDING_CLOSE" && (
           <div className="bg-yellow-900/30 border border-yellow-800 rounded-lg px-3 py-2 mb-2 text-xs text-yellow-300">
-            Pending close — executes at market open 9:30 AM ET
+            Limit buy-to-close order open — waiting to fill
           </div>
         )}
 
@@ -143,11 +144,31 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
         {/* Open contract */}
         {ticker.openContract && (
           <div className="mt-3 bg-zinc-900 rounded-lg p-3 text-xs">
+            {/* Option status line */}
+            {(() => {
+              const strike = Number(ticker.openContract.strikePrice);
+              const price = ticker.stockPrice;
+              const isPut = ticker.openContract.type === "PUT";
+              const itm = isPut ? price < strike : price > strike;
+              const diff = isPut ? strike - price : price - strike;
+              const pctFromStrike = strike > 0 ? Math.abs(diff / strike * 100) : 0;
+
+              return (
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full ${itm ? "bg-red-500" : "bg-green-500"}`} />
+                    <span className={`text-xs font-medium ${itm ? "text-red-400" : "text-green-400"}`}>
+                      {itm ? "ITM" : "OTM"} — {isPut ? "Put" : "Call"} ${strike}
+                    </span>
+                  </div>
+                  <span className="text-xs text-zinc-500">
+                    Stock ${price.toFixed(2)} ({pctFromStrike.toFixed(1)}% {itm ? "in" : "out"})
+                  </span>
+                </div>
+              );
+            })()}
+
             <div className="flex justify-between text-zinc-400">
-              <span>
-                {ticker.openContract.type === "PUT" ? "Put" : "Call"} @ $
-                {ticker.openContract.strikePrice}
-              </span>
               <span>
                 Exp{" "}
                 {new Date(ticker.openContract.expiration).toLocaleDateString(
@@ -155,6 +176,11 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
                   { month: "short", day: "numeric", timeZone: "America/Los_Angeles" }
                 )}
               </span>
+              {ticker.openContract.buybackCost !== undefined && ticker.openContract.buybackCost > 0 && (
+                <span className="text-zinc-500">
+                  Mid ${(ticker.openContract.buybackCost / 100).toFixed(2)}
+                </span>
+              )}
             </div>
             <div className="flex justify-between mt-1">
               <span className="text-green-400">

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sql, genId } from "@/lib/db";
-import { getOptionQuote, getAccount, getPositions, getOrders } from "@/lib/alpaca";
+import { getOptionQuote, getLatestQuote, getAccount, getPositions, getOrders } from "@/lib/alpaca";
 import { checkTickerApproved, checkAvgVolume, checkPremiumRichness, checkRiskCap } from "@/lib/guards";
 import { findBestPut } from "@/lib/options";
 import { getConfigNum } from "@/lib/config";
@@ -69,6 +69,13 @@ export async function GET() {
         }
       }
 
+      // Get current stock price
+      let stockPrice = 0;
+      try {
+        const sq = await getLatestQuote(t.symbol as string);
+        stockPrice = Math.round(sq.lastPrice * 100) / 100;
+      } catch { /* skip */ }
+
       const premium = openContract ? openContract.premium : 0;
       const buyback = openContract ? openContract.buybackCost : 0;
 
@@ -115,6 +122,7 @@ export async function GET() {
         openContract,
         cycleId: t.cycleId || null,
         livePL: premium > 0 ? Math.round((premium - buyback) * 100) / 100 : null,
+        stockPrice,
         guardBlock,
       });
     }

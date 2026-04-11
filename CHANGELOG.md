@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.000034 — 2026-04-11
+- Option status indicator: green dot + OTM or red dot + ITM on each contract
+- Shows stock price vs strike with % distance
+- Option mid price displayed on contract row
+- Updated banners: "Limit sell/buy order open — waiting to fill" (not "executes at market open")
+- Stock price fetched per ticker in API response
+
 ## v1.000033 — 2026-04-09
 - Delete src/bot/ directory (dead code — everything runs via Vercel cron)
 - Remove bot/bot:dev scripts and tsx dependency from package.json
