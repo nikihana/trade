@@ -18,8 +18,9 @@ export function CapitalBar() {
   if (!tickers || !portfolio?.account) return null;
 
   const equity = portfolio.account.equity;
-  const buyingPower = portfolio.account.optionsBuyingPower;
-  const deployed = equity - buyingPower;
+  // Deployed capital comes directly from Alpaca positions (sum of strike × 100 for short puts)
+  const deployed = portfolio.deployedCapital ?? 0;
+  const available = equity - deployed;
   const pct = equity > 0 ? (deployed / equity) * 100 : 0;
 
   return (
@@ -45,7 +46,7 @@ export function CapitalBar() {
 
       <div className="flex justify-between text-xs">
         <span className="text-green-400">{fmt(deployed)} deployed</span>
-        <span className="text-zinc-400">{fmt(buyingPower)} available</span>
+        <span className="text-zinc-400">{fmt(available)} available</span>
         <span className="text-white font-medium">{fmt(equity)} equity</span>
       </div>
     </div>

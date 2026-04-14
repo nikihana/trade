@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.000036 — 2026-04-14
+- Cancel-and-replace API: POST /api/tickers/[symbol]/replace cancels pending order and submits new one
+- Capital deployment now calculated dynamically from Alpaca positions on every refresh
+- Deployed capital = sum of (strike price x 100) for each open short put confirmed by Alpaca
+- If Alpaca reports no open positions, deployed capital shows $0 — local state never overrides broker
+
 ## v1.000035 — 2026-04-11
 - Clear P&L breakdown on each position: Collected / To close now / Net if closed
 - Green = in profit, red = at a loss — instant visual
