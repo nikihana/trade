@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { sql, genId } from "@/lib/db";
-import { liquidatePosition, submitOptionOrder, getOptionQuote } from "@/lib/alpaca";
+import { liquidatePosition, submitOptionOrder, getOptionQuote, cancelOrder, getOrders } from "@/lib/alpaca";
 import { isMarketHours } from "@/lib/utils";
 
 export async function POST(
@@ -29,6 +29,43 @@ export async function POST(
 
     for (const contract of openContracts) {
       try {
+        // PENDING orders (unfilled limit sells) — cancel on Alpaca, no position to liquidate
+        if (contract.status === "PENDING") {
+          let cancelled = false;
+          if (contract.alpacaOrderId) {
+            try {
+              await cancelOrder(contract.alpacaOrderId as string);
+              cancelled = true;
+            } catch { /* order may already be gone */ }
+          }
+          if (!cancelled) {
+            // Fallback: search open orders by option symbol
+            const openOrders = await getOrders("open", 100);
+            const match = (openOrders as { id: string; symbol: string }[]).find(
+              (o) => o.symbol === (contract.symbol as string)
+            );
+            if (match) {
+              await cancelOrder(match.id);
+              cancelled = true;
+            }
+          }
+
+          await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = 0, "closedReason" = 'CANCELLED' WHERE id = ${contract.id}`;
+          await sql`INSERT INTO "TradeLog" (id, timestamp, level, ticker, message) VALUES (${genId()}, now(), 'TRADE', ${upper}, ${`CANCELLED: ${contract.symbol} (unfilled limit order)${cancelled ? "" : " — no matching Alpaca order found"}`})`;
+
+          results.push({
+            symbol: contract.symbol,
+            type: contract.type,
+            strikePrice: contract.strikePrice,
+            premium: 0,
+            closeCost: 0,
+            netPL: 0,
+            cancelled: true,
+          });
+          continue;
+        }
+
+        // OPEN contracts — liquidate or buy-to-close as before
         let closeCost = 0;
         try {
           const quote = await getOptionQuote(contract.symbol as string);

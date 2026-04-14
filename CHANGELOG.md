@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.000037 — 2026-04-14
+- Close button now works on PENDING (unfilled) orders — cancels the Alpaca order instead of trying to liquidate
+- PENDING orders cancelled cleanly with no P&L impact (no premium was collected)
+- Fallback search by option symbol if alpacaOrderId is missing
+
 ## v1.000036 — 2026-04-14
 - Cancel-and-replace API: POST /api/tickers/[symbol]/replace cancels pending order and submits new one
 - Capital deployment now calculated dynamically from Alpaca positions on every refresh

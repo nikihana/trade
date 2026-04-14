@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-const VERSION = "v1.000036";
+const VERSION = "v1.000037";
 
 function parseChangelog(raw: string) {
   return raw.split(/^## /m).filter(Boolean).map((block) => {
