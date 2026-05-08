@@ -32,6 +32,7 @@ interface Finding {
   symbol: string;
   cycleId: string;
   dbStatus: string;
+  dbClosedReason: string | null;
   dbClosePrice: number | null;
   alpacaCloseStatus: string;
   alpacaFilledPrice: number | null;
@@ -43,6 +44,51 @@ interface Finding {
   sql: string | null;
 }
 
+interface FormulaGapRow {
+  contractId: string;
+  symbol: string;
+  cycleId: string;
+  closedReason: string;
+  premium: number;
+  closePrice: number | null;
+}
+
+/**
+ * Per-contract contribution to WheelCycle.realizedPL, mirroring production
+ * code paths exactly (see verification report). Returns 0 for any closedReason
+ * that production does NOT propagate — including STOP_LOSS / PROFIT_TARGET,
+ * which is a known production gap tracked separately in the report.
+ */
+function realizedPLContribution(
+  status: string,
+  closedReason: string | null,
+  premium: number,
+  closePrice: number | null
+): number {
+  // PENDING_CLOSE → CLOSED reconciler (Sites A & B): closedReason carries
+  // forward as 'MANUAL' from when the close was queued. The market-hours
+  // liquidate path (Site C.2) also sets closedReason = 'MANUAL'.
+  if (status === "CLOSED" && closedReason === "MANUAL") {
+    return premium - (closePrice ?? 0);
+  }
+  // PENDING cancellation (Site C.1) — order never filled, no money changed hands
+  if (status === "CLOSED" && closedReason === "CANCELLED") return 0;
+  // Worthless expiry — production sweep does not touch realizedPL
+  if (status === "EXPIRED" && closedReason === "EXPIRATION") return 0;
+  // Assignment — handled by cycle-level call-away logic (Site D), not per-contract
+  if (status === "ASSIGNED") return 0;
+  // STOP_LOSS / PROFIT_TARGET — production currently does NOT update realizedPL
+  // (known gap, deferred). Mirror production so audit reports zero drift.
+  if (
+    status === "CLOSED" &&
+    (closedReason === "STOP_LOSS" || closedReason === "PROFIT_TARGET")
+  ) {
+    return 0;
+  }
+  // Anything else: zero contribution. The caller should flag for review.
+  return 0;
+}
+
 /**
  * GET /api/admin/audit-pnl
  * Read-only. Audits Contract rows for close-path corruption from prior silent-zero quotes.
@@ -51,22 +97,60 @@ interface Finding {
  */
 export async function GET() {
   try {
+    // Suspect rows: CLOSED via MANUAL with $0/NULL closePrice (the actual
+    // corruption shape) OR half-written PENDING_CLOSE OR FAILED_CLOSE.
+    // CANCELLED/EXPIRATION rows with closePrice=0 are NOT suspect — production
+    // intentionally writes 0 there and never touches realizedPL.
     const suspectRows = await sql`
       SELECT id, symbol, "cycleId", status,
              "closePrice", "closedReason", "closedAt",
              "alpacaOrderId", premium, type
       FROM "Contract"
       WHERE
-        (status = 'CLOSED' AND ("closePrice" = 0 OR "closePrice" IS NULL))
+        (status = 'CLOSED' AND "closedReason" = 'MANUAL'
+          AND ("closePrice" = 0 OR "closePrice" IS NULL))
         OR (status = 'PENDING_CLOSE' AND "closedAt" IS NOT NULL)
         OR ("closedReason" = 'FAILED_CLOSE')
       ORDER BY "closedAt" DESC NULLS LAST
     `;
 
+    // Production formula gaps: contracts that closed via STOP_LOSS or
+    // PROFIT_TARGET. Production never updates realizedPL on these paths.
+    const formulaGapRows = await sql`
+      SELECT id, symbol, "cycleId", "closedReason", premium, "closePrice"
+      FROM "Contract"
+      WHERE status = 'CLOSED'
+        AND "closedReason" IN ('STOP_LOSS', 'PROFIT_TARGET')
+      ORDER BY "closedAt" DESC NULLS LAST
+    `;
+    const gapRows: FormulaGapRow[] = formulaGapRows.map((r) => ({
+      contractId: String(r.id),
+      symbol: String(r.symbol),
+      cycleId: String(r.cycleId),
+      closedReason: String(r.closedReason),
+      premium: Number(r.premium),
+      closePrice: r.closePrice !== null ? Number(r.closePrice) : null,
+    }));
+
     const totalContracts = (await sql`SELECT COUNT(*) AS c FROM "Contract"`)[0].c;
 
     if (suspectRows.length === 0) {
-      const md = renderEmpty(Number(totalContracts));
+      // Even with no suspects, sum cycles + emit gap section so the report
+      // is complete and the deferred bug stays visible.
+      const cycles = await sql`SELECT id, "realizedPL" FROM "WheelCycle"`;
+      const currentRealizedPL = cycles.reduce(
+        (s, c) => s + Number(c.realizedPL || 0),
+        0
+      );
+      const md = renderReport(
+        Number(totalContracts),
+        [],
+        0,
+        currentRealizedPL,
+        currentRealizedPL,
+        0,
+        gapRows
+      );
       return new NextResponse(md, { headers: { "content-type": "text/markdown" } });
     }
 
@@ -115,16 +199,27 @@ export async function GET() {
         }
       }
 
-      // closePrice in DB is stored as dollars (per-contract cost = midPrice * 100)
-      // Alpaca filled_avg_price is per-share — multiply by 100 to compare
+      // closePrice in DB is stored as dollars-per-contract (= midPrice * 100).
+      // Alpaca filled_avg_price is per-share — multiply by 100 to compare.
       const correctedClosePrice =
         alpacaFilledPrice !== null ? alpacaFilledPrice * 100 : null;
 
-      // Current contribution to realizedPL from this row (in cycle accounting):
-      //   on close, realizedPL += premium - closePrice
-      const currentContrib = row.closePrice !== null ? row.premium - row.closePrice : 0;
+      // Contribution to realizedPL — uses the production formula from
+      // realizedPLContribution(). For non-MANUAL rows this is always 0,
+      // even if closePrice is non-zero, because production never propagates
+      // those to realizedPL.
+      const currentContrib = realizedPLContribution(
+        row.status,
+        row.closedReason,
+        row.premium,
+        row.closePrice
+      );
+      // Corrected contribution: same formula, but assume the close price would
+      // be the Alpaca-confirmed fill if MANUAL, else 0.
       const correctedContrib =
-        correctedClosePrice !== null ? row.premium - correctedClosePrice : 0;
+        row.closedReason === "MANUAL" && correctedClosePrice !== null
+          ? row.premium - correctedClosePrice
+          : 0;
 
       let suggestion: string;
       let sqlFix: string | null = null;
@@ -164,6 +259,7 @@ export async function GET() {
         symbol: row.symbol,
         cycleId: row.cycleId,
         dbStatus: row.status,
+        dbClosedReason: row.closedReason,
         dbClosePrice: row.closePrice,
         alpacaCloseStatus,
         alpacaFilledPrice,
@@ -192,7 +288,8 @@ export async function GET() {
       confirmedCorruption,
       currentRealizedPL,
       correctedRealizedPL,
-      totalDelta
+      totalDelta,
+      gapRows
     );
 
     return new NextResponse(md, { headers: { "content-type": "text/markdown" } });
@@ -209,26 +306,14 @@ function fmtP(n: number | null): string {
   return `$${n.toFixed(2)}`;
 }
 
-function renderEmpty(total: number): string {
-  return [
-    `## Audit findings`,
-    ``,
-    `Total contracts inspected: ${total}`,
-    `Contracts with suspicious state: 0`,
-    `Contracts with confirmed corruption (Alpaca disagrees with DB): 0`,
-    ``,
-    `**No suspect rows found.** Nothing to reconcile.`,
-    ``,
-  ].join("\n");
-}
-
 function renderReport(
   total: number,
   findings: Finding[],
   confirmedCorruption: number,
   currentPL: number,
   correctedPL: number,
-  delta: number
+  delta: number,
+  formulaGapRows: FormulaGapRow[]
 ): string {
   const lines: string[] = [];
   lines.push(`## Audit findings`);
@@ -237,40 +322,71 @@ function renderReport(
   lines.push(`Contracts with suspicious state: ${findings.length}`);
   lines.push(`Contracts with confirmed corruption (Alpaca disagrees with DB): ${confirmedCorruption}`);
   lines.push(``);
-  lines.push(`### Detailed findings`);
-  lines.push(``);
-  lines.push(
-    `| Contract ID | Symbol | DB status | DB closePrice | Alpaca status | Alpaca filled price | Suggestion |`
-  );
-  lines.push(
-    `|-------------|--------|-----------|---------------|---------------|---------------------|------------|`
-  );
-  for (const f of findings) {
+
+  if (findings.length > 0) {
+    lines.push(`### Detailed findings`);
+    lines.push(``);
     lines.push(
-      `| ${shortId(f.contractId)} | ${f.symbol} | ${f.dbStatus} | ${fmtP(f.dbClosePrice)} | ${f.alpacaCloseStatus} | ${fmtP(f.alpacaFilledPrice !== null ? f.alpacaFilledPrice * 100 : null)} | ${f.suggestion} |`
+      `| Contract ID | Symbol | DB status | DB closedReason | DB closePrice | Alpaca status | Alpaca filled price | Suggestion |`
     );
+    lines.push(
+      `|-------------|--------|-----------|-----------------|---------------|---------------|---------------------|------------|`
+    );
+    for (const f of findings) {
+      lines.push(
+        `| ${shortId(f.contractId)} | ${f.symbol} | ${f.dbStatus} | ${f.dbClosedReason ?? "NULL"} | ${fmtP(f.dbClosePrice)} | ${f.alpacaCloseStatus} | ${fmtP(f.alpacaFilledPrice !== null ? f.alpacaFilledPrice * 100 : null)} | ${f.suggestion} |`
+      );
+    }
+    lines.push(``);
+  } else {
+    lines.push(`**No suspect rows found.** Nothing to reconcile.`);
+    lines.push(``);
   }
-  lines.push(``);
+
   lines.push(`### P&L impact`);
   lines.push(``);
   lines.push(`Current dashboard Realized P&L: $${currentPL.toFixed(2)}`);
   lines.push(`Corrected Realized P&L (computed): $${correctedPL.toFixed(2)}`);
   lines.push(`Delta: $${delta.toFixed(2)}`);
   lines.push(``);
+
   const fixes = findings.filter((f) => f.sql !== null);
+  lines.push(`### Recommended SQL corrections (for user review — do not execute)`);
+  lines.push(``);
   if (fixes.length > 0) {
-    lines.push(`### Recommended SQL corrections (for user review — do not execute)`);
-    lines.push(``);
     lines.push("```sql");
     for (const f of fixes) lines.push(f.sql!);
     lines.push("```");
-    lines.push(``);
   } else {
-    lines.push(`### Recommended SQL corrections`);
-    lines.push(``);
     lines.push(`None — no actionable corruption found.`);
-    lines.push(``);
   }
+  lines.push(``);
+
+  // Production-gap section — surfaces deferred bugs every time the audit runs
+  lines.push(`### Production formula gaps`);
+  lines.push(``);
+  lines.push(
+    `STOP_LOSS and PROFIT_TARGET close paths in tick-engine.ts (lines 165, 185) ` +
+    `set Contract.status = 'CLOSED' but do NOT update WheelCycle.realizedPL. ` +
+    `When either path fires on a real position, the cycle's P&L will be silently wrong.`
+  );
+  lines.push(``);
+  if (formulaGapRows.length === 0) {
+    lines.push(
+      `**Exercised rows:** 0 — STOP_LOSS / PROFIT_TARGET realizedPL update is a known production gap that has not yet fired on real data.`
+    );
+  } else {
+    lines.push(`**Exercised rows:** ${formulaGapRows.length}`);
+    lines.push(``);
+    lines.push(`| Contract ID | Symbol | closedReason | premium | closePrice |`);
+    lines.push(`|-------------|--------|--------------|---------|------------|`);
+    for (const g of formulaGapRows) {
+      lines.push(
+        `| ${shortId(g.contractId)} | ${g.symbol} | ${g.closedReason} | ${fmtP(g.premium)} | ${fmtP(g.closePrice)} |`
+      );
+    }
+  }
+  lines.push(``);
   lines.push(`---`);
   lines.push(`Generated ${new Date().toISOString()}. No corrections were applied.`);
   return lines.join("\n");
