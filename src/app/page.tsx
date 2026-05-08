@@ -6,7 +6,6 @@ import { AddTickerDialog } from "./components/AddTickerDialog";
 import { RunTickButton } from "./components/RunTickButton";
 import { RegimeBadge } from "./components/RegimeBadge";
 import { CapitalBar } from "./components/CapitalBar";
-import { CandidatesCard } from "./components/CandidatesCard";
 import { PendingApprovalsCard } from "./components/PendingApprovalsCard";
 import { useTickers, useCandidates } from "@/lib/hooks";
 
@@ -77,14 +76,6 @@ export default function Home() {
           <PendingApprovalsCard />
         </section>
       )}
-
-      {/* Weekly picks */}
-      <section>
-        <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-3">
-          Weekly Picks
-        </h2>
-        <CandidatesCard />
-      </section>
 
       {/* Active wheels — only tickers with open contracts */}
       <section>

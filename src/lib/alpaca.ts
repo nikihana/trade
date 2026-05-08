@@ -170,10 +170,18 @@ interface OrderParams {
   order_class?: string;
 }
 
+// Alpaca rejects option limit_price values with more than 2 decimals (422 42210000)
+function roundLimitPrice<T extends { limit_price?: number }>(p: T): T {
+  if (p.limit_price !== undefined) {
+    return { ...p, limit_price: Number(p.limit_price.toFixed(2)) };
+  }
+  return p;
+}
+
 export async function submitOrder(params: OrderParams) {
   return api<Record<string, unknown>>("/v2/orders", {
     method: "POST",
-    body: JSON.stringify(params),
+    body: JSON.stringify(roundLimitPrice(params)),
   });
 }
 
@@ -207,7 +215,7 @@ export async function submitOptionOrder(params: {
   return api<Record<string, unknown>>("/v2/orders", {
     method: "POST",
     body: JSON.stringify({
-      ...params,
+      ...roundLimitPrice(params),
       asset_class: "us_option",
     }),
   });
@@ -233,7 +241,7 @@ export async function submitMultiLegOrder(params: {
       legs: params.legs,
       type: params.type,
       time_in_force: params.time_in_force,
-      ...(params.limit_price && { limit_price: params.limit_price }),
+      ...(params.limit_price !== undefined && { limit_price: Number(params.limit_price.toFixed(2)) }),
     }),
   });
 }
