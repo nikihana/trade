@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 // Public paths that don't require authentication
-const publicPaths = ["/login", "/setup", "/api/auth", "/api/bot/cron", "/api/bot/screen", "/api/bot/morning", "/api/admin/migrate"];
+const publicPaths = ["/login", "/setup", "/api/auth", "/api/bot/cron", "/api/bot/screen", "/api/bot/morning", "/api/admin/migrate", "/manifest.json"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
