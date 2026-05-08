@@ -248,25 +248,36 @@ export async function submitMultiLegOrder(params: {
 
 // ── Option Quote ─────────────────────────────────────────
 
+/**
+ * Fetch latest option quote. Throws on any failure — never returns silent zeros.
+ * Callers must handle the throw and decide whether to skip, drop, or surface the error.
+ * A quote with bp=0 AND ap=0 is treated as a failure (no real market on this contract).
+ */
 export async function getOptionQuote(
   optionSymbol: string
 ): Promise<{ bidPrice: number; askPrice: number; midPrice: number }> {
+  let data: { quotes?: Record<string, { bp?: number; ap?: number }> };
   try {
-    const data = await api<{ quotes?: Record<string, { bp?: number; ap?: number }> }>(
+    data = await api<{ quotes?: Record<string, { bp?: number; ap?: number }> }>(
       `/v1beta1/options/quotes/latest?symbols=${encodeURIComponent(optionSymbol)}&feed=indicative`,
       undefined,
       DATA_URL
     );
-    const quote = Object.values(data.quotes || {})[0];
-    if (!quote) throw new Error("No quote data");
-    const bp = quote.bp || 0;
-    const ap = quote.ap || 0;
-    return {
-      bidPrice: bp,
-      askPrice: ap,
-      midPrice: (bp + ap) / 2,
-    };
-  } catch {
-    return { bidPrice: 0, askPrice: 0, midPrice: 0 };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Quote fetch failed for ${optionSymbol}: ${msg}`);
   }
+
+  const quote = Object.values(data.quotes || {})[0];
+  if (!quote) {
+    throw new Error(`No quote data for ${optionSymbol}`);
+  }
+
+  const bp = quote.bp || 0;
+  const ap = quote.ap || 0;
+  if (bp === 0 && ap === 0) {
+    throw new Error(`No bid/ask available for ${optionSymbol} (illiquid or expired)`);
+  }
+
+  return { bidPrice: bp, askPrice: ap, midPrice: (bp + ap) / 2 };
 }

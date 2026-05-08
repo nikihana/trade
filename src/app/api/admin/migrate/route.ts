@@ -11,6 +11,16 @@ export async function POST() {
     await sql`ALTER TABLE "Candidate" ADD COLUMN IF NOT EXISTS "yieldRank" integer`;
     await sql`ALTER TABLE "Ticker" ADD COLUMN IF NOT EXISTS "flaggedForReview" boolean NOT NULL DEFAULT false`;
 
+    // Trust signal — flips to 'true' once historical close-path corruption is reviewed
+    await sql`
+      INSERT INTO "Config" (key, value, label, description, type)
+      VALUES ('realized_pl_verified', 'false',
+              'Realized P&L verified',
+              'Set to true once historical close-path corruption has been audited and corrected. Until then, dashboard shows an unverified badge.',
+              'boolean')
+      ON CONFLICT (key) DO NOTHING
+    `;
+
     // Back-fill yieldRank by premiumYield ordering within each weekOf.
     // Idempotent — running again over correctly-ranked rows keeps them correct.
     await sql`

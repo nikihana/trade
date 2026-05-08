@@ -35,27 +35,22 @@ export function PortfolioCard() {
     );
   }
 
-  const stats = [
-    {
-      label: "Cash",
-      value: fmt(data.account.cash),
-      color: "text-white",
-    },
-    {
-      label: "Equity",
-      value: fmt(data.account.equity),
-      color: "text-white",
-    },
-    {
-      label: "Premium",
-      value: fmt(data.totalPremium),
-      color: "text-green-400",
-    },
+  const plVerified: boolean = data.plVerified ?? false;
+
+  const stats: Array<{
+    label: string;
+    value: string;
+    color: string;
+    unverified?: boolean;
+  }> = [
+    { label: "Cash", value: fmt(data.account.cash), color: "text-white" },
+    { label: "Equity", value: fmt(data.account.equity), color: "text-white" },
+    { label: "Premium", value: fmt(data.totalPremium), color: "text-green-400" },
     {
       label: "Realized P&L",
       value: fmt(data.totalRealizedPL),
-      color:
-        data.totalRealizedPL >= 0 ? "text-green-400" : "text-red-400",
+      color: data.totalRealizedPL >= 0 ? "text-green-400" : "text-red-400",
+      unverified: !plVerified,
     },
   ];
 
@@ -66,9 +61,19 @@ export function PortfolioCard() {
           key={stat.label}
           className="bg-zinc-800 rounded-xl p-4 border border-zinc-700"
         >
-          <p className="text-xs text-zinc-400 uppercase tracking-wider">
-            {stat.label}
-          </p>
+          <div className="flex items-center justify-between gap-1">
+            <p className="text-xs text-zinc-400 uppercase tracking-wider">
+              {stat.label}
+            </p>
+            {stat.unverified && (
+              <span
+                title="Unverified — pending historical reconciliation. Run /api/admin/audit-pnl, review the report, then set realized_pl_verified=true in Config."
+                className="text-[10px] bg-yellow-900/40 text-yellow-400 px-1.5 py-0.5 rounded border border-yellow-700/50 cursor-help"
+              >
+                unverified
+              </span>
+            )}
+          </div>
           <p className={`text-lg font-bold mt-1 ${stat.color}`}>
             {stat.value}
           </p>

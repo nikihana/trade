@@ -53,11 +53,16 @@ export async function findBullPutSpread(
   buyContracts.sort((a, b) => Math.abs(a.strikePrice - buyStrike) - Math.abs(b.strikePrice - buyStrike));
   const buyLeg = buyContracts[0];
 
-  // Get quotes
-  const [sellQ, buyQ] = await Promise.all([
-    getOptionQuote(sellLeg.symbol),
-    getOptionQuote(buyLeg.symbol),
-  ]);
+  // Get quotes — drop spread if either leg has no quote
+  let sellQ, buyQ;
+  try {
+    [sellQ, buyQ] = await Promise.all([
+      getOptionQuote(sellLeg.symbol),
+      getOptionQuote(buyLeg.symbol),
+    ]);
+  } catch {
+    return null;
+  }
 
   const sellPremium = sellQ.midPrice * 100;
   const buyPremium = buyQ.midPrice * 100;
@@ -115,10 +120,15 @@ export async function findBearCallSpread(
   buyContracts.sort((a, b) => Math.abs(a.strikePrice - buyStrike) - Math.abs(b.strikePrice - buyStrike));
   const buyLeg = buyContracts[0];
 
-  const [sellQ, buyQ] = await Promise.all([
-    getOptionQuote(sellLeg.symbol),
-    getOptionQuote(buyLeg.symbol),
-  ]);
+  let sellQ, buyQ;
+  try {
+    [sellQ, buyQ] = await Promise.all([
+      getOptionQuote(sellLeg.symbol),
+      getOptionQuote(buyLeg.symbol),
+    ]);
+  } catch {
+    return null;
+  }
 
   const sellPremium = sellQ.midPrice * 100;
   const buyPremium = buyQ.midPrice * 100;
@@ -203,7 +213,12 @@ export async function buySpyPutHedge(
   );
 
   const best = contracts[0];
-  const q = await getOptionQuote(best.symbol);
+  let q;
+  try {
+    q = await getOptionQuote(best.symbol);
+  } catch {
+    return null;
+  }
   const premium = q.midPrice * 100;
 
   if (premium <= 0 || premium > budget) return null;

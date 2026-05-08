@@ -35,12 +35,12 @@ export async function logTickSnapshot() {
       WHERE t.symbol = ${symbol} AND c.status IN ('OPEN', 'PENDING')
       LIMIT 1
     `;
-    let optionMid = 0;
+    let optionMid: number | null = null;
     if (openContracts.length > 0) {
       try {
         const q = await getOptionQuote(openContracts[0].symbol as string);
         optionMid = q.midPrice;
-      } catch { /* skip */ }
+      } catch { /* leave null — quote unavailable */ }
     }
 
     const unrealizedPL = pos ? Math.round(pos.unrealizedPL * 100) / 100 : 0;
@@ -54,7 +54,7 @@ export async function logTickSnapshot() {
       shares: Number(cycle.sharesHeld),
       costBasis: cycle.costBasis ? Number(cycle.costBasis) : null,
       unrealizedPL,
-      optionMid: Math.round(optionMid * 100) / 100,
+      optionMid: optionMid !== null ? Math.round(optionMid * 100) / 100 : null,
       trueNetReturn: Math.round((premium + unrealizedPL) * 100) / 100,
     });
   }

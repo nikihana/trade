@@ -77,15 +77,18 @@ export async function POST(
       }, { status: 404 });
     }
 
-    // 5. Get premium quote
-    const q = await getOptionQuote(put.symbol);
-    const premium = q.midPrice * 100;
-    if (premium <= 0) {
+    // 5. Get premium quote — fail fast if unavailable
+    let q;
+    try {
+      q = await getOptionQuote(put.symbol);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
       return NextResponse.json({
         cancelled: { symbol: oldSymbol, strike: oldStrike, cancelledAlpaca },
-        error: `Cancelled old order but new contract ${put.symbol} has no premium`,
-      }, { status: 400 });
+        error: `Cancelled old order but quote unavailable for ${put.symbol}: ${msg}`,
+      }, { status: 502 });
     }
+    const premium = q.midPrice * 100;
 
     // 6. Submit new order
     const limitPrice = q.bidPrice > 0 ? q.bidPrice : q.midPrice;

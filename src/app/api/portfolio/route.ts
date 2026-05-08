@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAccount, getPositions } from "@/lib/alpaca";
 import { sql } from "@/lib/db";
+import { getConfig } from "@/lib/config";
 
 /** Parse strike price from OCC option symbol (e.g. AMD260424P00226000 → 226) */
 function parseStrikeFromOCC(symbol: string): number {
@@ -29,7 +30,9 @@ export async function GET() {
       .filter((p) => p.qty < 0 && p.symbol.match(/[A-Z]+\d{6}P\d{8}$/))
       .reduce((sum, p) => sum + parseStrikeFromOCC(p.symbol) * 100, 0);
 
-    return NextResponse.json({ account, positions, totalPremium, totalRealizedPL, deployedCapital });
+    const plVerified = (await getConfig("realized_pl_verified")) === "true";
+
+    return NextResponse.json({ account, positions, totalPremium, totalRealizedPL, deployedCapital, plVerified });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unknown error" }, { status: 500 });
   }

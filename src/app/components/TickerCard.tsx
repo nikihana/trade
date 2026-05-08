@@ -26,7 +26,7 @@ interface TickerData {
     expiration: string;
     premium: number;
     status: string;
-    buybackCost?: number;
+    buybackCost?: number | null;
     closedReason?: string;
   } | null;
 }
@@ -179,8 +179,10 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
           const itm = isPut ? price < strike : price > strike;
           const pctFromStrike = strike > 0 ? Math.abs((strike - price) / strike * 100) : 0;
           const premium = ticker.openContract.premium;
-          const buyback = ticker.openContract.buybackCost || 0;
-          const closeNowPL = premium > 0 ? premium - buyback : 0;
+          const buybackRaw = ticker.openContract.buybackCost;
+          const buybackUnknown = buybackRaw === null || buybackRaw === undefined;
+          const buyback = buybackUnknown ? 0 : (buybackRaw as number);
+          const closeNowPL = premium > 0 && !buybackUnknown ? premium - buyback : 0;
           const isPending = ticker.openContract.status === "PENDING";
           const isClosing = ticker.openContract.status === "PENDING_CLOSE";
 
@@ -226,13 +228,17 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-zinc-400">To close now</span>
-                    <span className="text-red-300">-{fmt(buyback)}</span>
+                    <span className="text-red-300">{buybackUnknown ? "—" : `-${fmt(buyback)}`}</span>
                   </div>
                   <div className="flex justify-between border-t border-zinc-800 pt-1">
                     <span className="text-white font-medium">Net if closed</span>
-                    <span className={`font-bold ${closeNowPL >= 0 ? "text-green-400" : "text-red-400"}`}>
-                      {closeNowPL >= 0 ? "+" : ""}{fmt(closeNowPL)}
-                    </span>
+                    {buybackUnknown ? (
+                      <span className="text-zinc-500">—</span>
+                    ) : (
+                      <span className={`font-bold ${closeNowPL >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {closeNowPL >= 0 ? "+" : ""}{fmt(closeNowPL)}
+                      </span>
+                    )}
                   </div>
                 </div>
               )}

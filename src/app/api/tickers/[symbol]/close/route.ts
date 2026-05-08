@@ -65,12 +65,19 @@ export async function POST(
           continue;
         }
 
-        // OPEN contracts — liquidate or buy-to-close as before
-        let closeCost = 0;
+        // OPEN contracts — liquidate or buy-to-close as before.
+        // Quote MUST succeed before any submission or DB write — no silent zeros.
+        let quote;
         try {
-          const quote = await getOptionQuote(contract.symbol as string);
-          closeCost = Math.round(quote.midPrice * 100 * 100) / 100;
-        } catch { /* skip */ }
+          quote = await getOptionQuote(contract.symbol as string);
+        } catch (qe) {
+          const qmsg = qe instanceof Error ? qe.message : String(qe);
+          allSucceeded = false;
+          results.push({ symbol: contract.symbol, error: `Quote unavailable: ${qmsg}` });
+          await sql`INSERT INTO "TradeLog" (id, timestamp, level, ticker, message) VALUES (${genId()}, now(), 'ERROR', ${upper}, ${`CLOSE FAILED: ${contract.symbol} — quote unavailable (${qmsg}). Position stays OPEN, no DB write.`})`;
+          continue;
+        }
+        const closeCost = Math.round(quote.midPrice * 100 * 100) / 100;
 
         const premium = Number(contract.premium);
         const netPL = Math.round((premium - closeCost) * 100) / 100;
@@ -83,7 +90,6 @@ export async function POST(
           await sql`INSERT INTO "TradeLog" (id, timestamp, level, ticker, message) VALUES (${genId()}, now(), 'TRADE', ${upper}, ${`LIQUIDATED: ${contract.symbol} | Cost: ~$${closeCost.toFixed(2)} | P&L: $${netPL.toFixed(2)}`})`;
         } else {
           // After hours: queue limit+GTC buy-to-close, mark PENDING_CLOSE
-          const quote = await getOptionQuote(contract.symbol as string);
           const limitPrice = quote.askPrice > 0 ? quote.askPrice : quote.midPrice;
 
           await submitOptionOrder({
@@ -153,11 +159,11 @@ export async function GET(
 
     const contracts = [];
     for (const c of openContracts) {
-      let estimatedCost = 0;
+      let estimatedCost: number | null = null;
       try {
         const q = await getOptionQuote(c.symbol as string);
         estimatedCost = q.midPrice * 100;
-      } catch { /* skip */ }
+      } catch { /* leave null — display layer renders "—" */ }
 
       contracts.push({
         type: c.type,

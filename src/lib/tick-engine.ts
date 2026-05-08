@@ -145,13 +145,21 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
 
       for (const contract of openContracts) {
         try {
-          // Stop-loss check (for PUTs)
+          // Stop-loss check (for PUTs) — quote MUST succeed before any submission or DB write
           if (contract.type === "PUT" && !contract.spreadType) {
             const currentPrice = (await getLatestQuote(symbol)).lastPrice;
             const stopLoss = await checkStopLoss(currentPrice, Number(contract.strikePrice));
             if (!stopLoss.allowed) {
               log(`${symbol}: ${stopLoss.reason}`);
-              const q = await getOptionQuote(contract.symbol as string);
+              let q;
+              try {
+                q = await getOptionQuote(contract.symbol as string);
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                log(`${symbol}: STOP-LOSS skipped — quote unavailable (${msg}). Position stays OPEN.`);
+                await logDb("ERROR", `STOP-LOSS skipped (quote unavailable): ${contract.symbol} — ${msg}`, symbol);
+                continue;
+              }
               const closeCost = q.midPrice * 100;
               await submitOptionOrder({ symbol: contract.symbol as string, qty: 1, side: "buy", type: "limit", time_in_force: "gtc", limit_price: q.askPrice > 0 ? q.askPrice : q.midPrice });
               await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${closeCost}, "closedReason" = 'STOP_LOSS' WHERE id = ${contract.id}`;
@@ -160,9 +168,15 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
             }
           }
 
-          // Profit target check
-          const q = await getOptionQuote(contract.symbol as string);
-          if (q.midPrice <= 0) continue;
+          // Profit target check — quote MUST succeed before any submission or DB write
+          let q;
+          try {
+            q = await getOptionQuote(contract.symbol as string);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            log(`${symbol}: profit-target check skipped — quote unavailable (${msg})`);
+            continue;
+          }
           const currentCost = q.midPrice * 100;
           const profitPct = ((Number(contract.premium) - currentCost) / Number(contract.premium)) * 100;
           if (profitPct >= profitTarget) {
@@ -171,7 +185,11 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
             await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${currentCost}, "closedReason" = 'PROFIT_TARGET' WHERE id = ${contract.id}`;
             await logDb("TRADE", `CLOSED at ${profitTarget}% profit: ${contract.symbol}`, symbol);
           }
-        } catch { /* skip */ }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          log(`${symbol}: monitor loop error — ${msg}`);
+          await logDb("ERROR", `Monitor loop error for ${contract.symbol}: ${msg}`, symbol);
+        }
       }
 
       // Detect assignment
@@ -329,9 +347,16 @@ async function execNakedPut(
   const positionSize = put.strikePrice * 100;
   if (positionSize > equity * 0.5) { log(`${symbol}: Position $${positionSize.toLocaleString()} exceeds 50% of equity — too large for this account`); return; }
   if (cashAvailable < positionSize) { log(`${symbol}: Not enough cash ($${cashAvailable.toFixed(0)} < $${positionSize.toLocaleString()})`); return; }
-  const q = await getOptionQuote(put.symbol);
+  let q;
+  try {
+    q = await getOptionQuote(put.symbol);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log(`${symbol}: skipped — quote unavailable for ${put.symbol} (${msg})`);
+    await logDb("WARN", `Skipped naked put — quote unavailable: ${put.symbol} — ${msg}`, symbol);
+    return;
+  }
   const premium = q.midPrice * 100;
-  if (premium <= 0) { log(`${symbol}: No premium`); return; }
 
   if (!override) {
     const premCheck = await checkPremiumRichness(premium, put.strikePrice);
@@ -415,9 +440,16 @@ async function execCoveredCall(
 ) {
   const call = await findBestCall(symbol, costBasis);
   if (!call) { log(`${symbol}: No call found`); return; }
-  const q = await getOptionQuote(call.symbol);
+  let q;
+  try {
+    q = await getOptionQuote(call.symbol);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    log(`${symbol}: skipped — quote unavailable for ${call.symbol} (${msg})`);
+    await logDb("WARN", `Skipped covered call — quote unavailable: ${call.symbol} — ${msg}`, symbol);
+    return;
+  }
   const premium = q.midPrice * 100;
-  if (premium <= 0) { log(`${symbol}: No premium`); return; }
 
   const callCheck = await checkCallPremium(premium);
   if (!callCheck.allowed) { log(`${symbol}: GUARD — ${callCheck.reason}`); await logDb("WARN", callCheck.reason!, symbol); return; }

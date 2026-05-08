@@ -53,11 +53,11 @@ export async function GET() {
         `;
         if (contracts[0]) {
           const c = contracts[0];
-          let buybackCost = 0;
+          let buybackCost: number | null = null;
           try {
             const q = await getOptionQuote(c.optionSymbol as string);
             buybackCost = Math.round(q.midPrice * 100 * 100) / 100;
-          } catch { /* skip */ }
+          } catch { /* leave null — display layer renders "—" */ }
           openContract = {
             type: c.type,
             strikePrice: c.strikePrice,
@@ -78,7 +78,7 @@ export async function GET() {
       } catch { /* skip */ }
 
       const premium = openContract ? openContract.premium : 0;
-      const buyback = openContract ? openContract.buybackCost : 0;
+      const buyback = openContract && openContract.buybackCost !== null ? openContract.buybackCost : null;
 
       // Check guards for pending tickers (no open contract)
       let guardBlock: string | null = null;
@@ -87,24 +87,31 @@ export async function GET() {
           const account = await getAccount();
           const put = await findBestPut(t.symbol as string, (t.strikePreference as string) || "10pct-otm");
           if (put) {
-            const pq = await getOptionQuote(put.symbol);
-            const putPremium = pq.midPrice * 100;
-            const posSize = put.strikePrice * 100;
-            const alloc = Number(t.allocation) || 0;
-
-            const premCheck = await checkPremiumRichness(putPremium, put.strikePrice);
-            if (!premCheck.allowed) {
-              guardBlock = premCheck.reason!;
-            } else if (alloc > 0 && posSize > alloc) {
-              guardBlock = `Position $${posSize.toLocaleString()} exceeds $${alloc.toLocaleString()} allocation`;
-            } else if (alloc <= 0 || posSize > alloc) {
-              const riskCheck = await checkRiskCap(put.strikePrice, account.equity, account.cash - posSize);
-              if (!riskCheck.allowed) guardBlock = riskCheck.reason!;
+            let pq;
+            try {
+              pq = await getOptionQuote(put.symbol);
+            } catch {
+              guardBlock = "Quote unavailable";
             }
+            if (pq) {
+              const putPremium = pq.midPrice * 100;
+              const posSize = put.strikePrice * 100;
+              const alloc = Number(t.allocation) || 0;
 
-            const minCashPct = await getConfigNum("min_cash_pct", 0.30);
-            if (!guardBlock && account.cash - posSize < account.equity * minCashPct) {
-              guardBlock = `Cash floor: $${(account.cash - posSize).toFixed(0)} below ${(minCashPct * 100).toFixed(0)}% of equity`;
+              const premCheck = await checkPremiumRichness(putPremium, put.strikePrice);
+              if (!premCheck.allowed) {
+                guardBlock = premCheck.reason!;
+              } else if (alloc > 0 && posSize > alloc) {
+                guardBlock = `Position $${posSize.toLocaleString()} exceeds $${alloc.toLocaleString()} allocation`;
+              } else if (alloc <= 0 || posSize > alloc) {
+                const riskCheck = await checkRiskCap(put.strikePrice, account.equity, account.cash - posSize);
+                if (!riskCheck.allowed) guardBlock = riskCheck.reason!;
+              }
+
+              const minCashPct = await getConfigNum("min_cash_pct", 0.30);
+              if (!guardBlock && account.cash - posSize < account.equity * minCashPct) {
+                guardBlock = `Cash floor: $${(account.cash - posSize).toFixed(0)} below ${(minCashPct * 100).toFixed(0)}% of equity`;
+              }
             }
           }
         } catch { /* skip guard check on error */ }
@@ -123,7 +130,7 @@ export async function GET() {
         sharesHeld: Number(t.sharesHeld) || 0,
         openContract,
         cycleId: t.cycleId || null,
-        livePL: premium > 0 ? Math.round((premium - buyback) * 100) / 100 : null,
+        livePL: premium > 0 && buyback !== null ? Math.round((premium - (buyback as number)) * 100) / 100 : null,
         stockPrice,
         guardBlock,
       });

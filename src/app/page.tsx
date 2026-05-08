@@ -28,7 +28,7 @@ interface TickerData {
     expiration: string;
     premium: number;
     status: string;
-    buybackCost?: number;
+    buybackCost?: number | null;
     closedReason?: string;
   };
 }
