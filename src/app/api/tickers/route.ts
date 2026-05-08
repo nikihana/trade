@@ -33,6 +33,7 @@ export async function GET() {
 
     const tickers = await sql`
       SELECT t.id, t.symbol, t.active, t.allocation, t."strikePreference",
+        COALESCE(t."flaggedForReview", false) as "flaggedForReview",
         wc.id as "cycleId", wc.stage, wc."totalPremium", wc."costBasis", wc."sharesHeld"
       FROM "Ticker" t
       LEFT JOIN "WheelCycle" wc ON wc."tickerId" = t.id AND wc."completedAt" IS NULL
@@ -115,6 +116,7 @@ export async function GET() {
         active: t.active,
         allocation: Number(t.allocation) || 0,
         strikePreference: t.strikePreference || "10pct-otm",
+        flaggedForReview: Boolean(t.flaggedForReview),
         stage: t.stage || null,
         totalPremium: Number(t.totalPremium) || 0,
         costBasis: t.costBasis ? Number(t.costBasis) : null,

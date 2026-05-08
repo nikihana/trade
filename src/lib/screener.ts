@@ -4,7 +4,7 @@ import { targetPutStrike, targetExpiration } from "./options";
 import { detectRegime } from "./regime";
 import { getScreeningUniverse } from "./universe";
 import { fetchEarningsDate, daysUntilEarnings } from "./earnings";
-import { getConfigNum } from "./config";
+import { getConfig, getConfigNum } from "./config";
 import { checkPremiumRichness, checkRiskCap } from "./guards";
 import { MarketRegime } from "./types";
 import { format, differenceInDays } from "date-fns";
@@ -61,8 +61,13 @@ export async function runWeeklyScreen(): Promise<ScreenResult> {
       return { success: true, weekOf, candidates: [], screened: 0, passed: 0, regime: regime.regime, logs };
     }
 
-    const universe = await getScreeningUniverse();
-    log(`Universe: ${universe.length} tickers`);
+    const rawUniverse = await getScreeningUniverse();
+    const excludedStr = await getConfig("excluded_tickers");
+    const excluded = excludedStr
+      ? new Set(excludedStr.split(",").map((s) => s.trim().toUpperCase()).filter(Boolean))
+      : new Set<string>();
+    const universe = rawUniverse.filter((s) => !excluded.has(s));
+    log(`Universe: ${universe.length} tickers${excluded.size > 0 ? ` (${excluded.size} excluded)` : ""}`);
 
     // ── Phase 1: Price filter (parallel batches of 20) ──
     const priceFiltered: { symbol: string; price: number }[] = [];
@@ -114,10 +119,27 @@ export async function runWeeklyScreen(): Promise<ScreenResult> {
     const top5 = deepResults.slice(0, 5);
 
     // ── Persist to DB ──
-    await sql`DELETE FROM "Candidate" WHERE "weekOf" = ${weekOf}`;
-    for (const c of top5) {
-      await sql`INSERT INTO "Candidate" (id, "weekOf", symbol, price, "suggestedStrike", premium, "premiumYield", "ivPercentile", "daysToEarnings", "openInterest", regime)
-        VALUES (${genId()}, ${weekOf}, ${c.symbol}, ${c.price}, ${c.suggestedStrike}, ${c.premium}, ${c.premiumYield}, ${c.ivPercentile}, ${c.daysToEarnings}, ${c.openInterest}, ${regime.regime})`;
+    // Supersede any previously proposed candidates from prior runs
+    await sql`UPDATE "Candidate" SET status = 'superseded' WHERE status = 'proposed'`;
+
+    for (let i = 0; i < top5.length; i++) {
+      const c = top5[i];
+      const yieldRank = i + 1;
+      await sql`INSERT INTO "Candidate" (id, "weekOf", symbol, price, "suggestedStrike", premium, "premiumYield", "ivPercentile", "daysToEarnings", "openInterest", regime, status, "yieldRank")
+        VALUES (${genId()}, ${weekOf}, ${c.symbol}, ${c.price}, ${c.suggestedStrike}, ${c.premium}, ${c.premiumYield}, ${c.ivPercentile}, ${c.daysToEarnings}, ${c.openInterest}, ${regime.regime}, 'proposed', ${yieldRank})`;
+    }
+
+    // ── Flag active Tickers no longer in the new top-N ──
+    const newSymbols = top5.map((c) => c.symbol);
+    if (newSymbols.length > 0) {
+      const activeNotInTopN = await sql`
+        SELECT t.symbol FROM "Ticker" t
+        WHERE t.active = true AND NOT (t.symbol = ANY(${newSymbols}))
+      `;
+      for (const t of activeNotInTopN) {
+        await sql`UPDATE "Ticker" SET "flaggedForReview" = true WHERE symbol = ${t.symbol as string}`;
+        log(`FLAGGED: ${t.symbol} no longer in top picks`);
+      }
     }
 
     // Log to TradeLog
@@ -125,8 +147,9 @@ export async function runWeeklyScreen(): Promise<ScreenResult> {
     await sql`INSERT INTO "TradeLog" (id, timestamp, level, message, data) VALUES (${genId()}, now(), 'INFO', ${`WEEKLY SCREEN: ${top5.length} candidates — ${summary}`}, ${JSON.stringify({ weekOf, candidates: top5 })})`;
 
     log(`Saved ${top5.length} candidates for week of ${weekOf}`);
-    for (const c of top5) {
-      log(`  ${c.symbol}: $${c.price.toFixed(2)} | strike $${c.suggestedStrike} | prem $${c.premium.toFixed(2)} | yield ${(c.premiumYield * 100).toFixed(1)}% | OI ${c.openInterest}${c.daysToEarnings ? ` | ${c.daysToEarnings}d to earnings` : ""}`);
+    for (let i = 0; i < top5.length; i++) {
+      const c = top5[i];
+      log(`  [${i + 1}] ${c.symbol}: $${c.price.toFixed(2)} | strike $${c.suggestedStrike} | prem $${c.premium.toFixed(2)} | yield ${(c.premiumYield * 100).toFixed(1)}% | OI ${c.openInterest}${c.daysToEarnings ? ` | ${c.daysToEarnings}d to earnings` : ""}`);
     }
 
     return {

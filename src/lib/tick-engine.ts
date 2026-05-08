@@ -1,5 +1,5 @@
 import { sql, genId } from "./db";
-import { getPositions, getLatestQuote, submitOptionOrder, getOptionQuote, getOrders } from "./alpaca";
+import { getPositions, getLatestQuote, submitOptionOrder, getOptionQuote, getOrders, getOrder } from "./alpaca";
 import { findBestPut, findBestCall } from "./options";
 import { getConfig, getConfigNum } from "./config";
 import { logTickSnapshot } from "./tick-snapshot";
@@ -59,15 +59,48 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
 
     const alpacaSymbolSet = new Set(alpacaShortOptions.map((p) => p.symbol));
 
-    // Check PENDING sell orders — if Alpaca now holds the position, the order filled
-    const pendingSells = await sql`SELECT c.id, c.symbol, c.premium, c."cycleId" FROM "Contract" c WHERE c.status = 'PENDING' AND c.action = 'SELL_TO_OPEN'`;
+    // Check PENDING sell orders — resolve against Alpaca order status as source of truth
+    const pendingSells = await sql`SELECT c.id, c.symbol, c.premium, c."cycleId", c."alpacaOrderId" FROM "Contract" c WHERE c.status = 'PENDING' AND c.action = 'SELL_TO_OPEN'`;
     for (const c of pendingSells) {
-      if (alpacaSymbolSet.has(c.symbol as string)) {
+      const orderId = c.alpacaOrderId as string | null;
+      if (!orderId) {
+        log(`RECONCILE: ${c.symbol} PENDING but no alpacaOrderId — skipping`);
+        continue;
+      }
+
+      let alpacaStatus = "";
+      let rejectReason = "";
+      try {
+        const order = await getOrder(orderId) as Record<string, unknown>;
+        alpacaStatus = String(order.status || "");
+        rejectReason = order.reject_reason ? String(order.reject_reason) : alpacaStatus;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("404") || msg.toLowerCase().includes("not found")) {
+          alpacaStatus = "not_found";
+          rejectReason = "order not found on Alpaca";
+        } else {
+          log(`RECONCILE: ${c.symbol} order fetch failed: ${msg} — leaving PENDING`);
+          continue;
+        }
+      }
+
+      if (alpacaStatus === "filled") {
         log(`RECONCILE: ${c.symbol} PENDING → OPEN (order filled)`);
         await sql`UPDATE "Contract" SET status = 'OPEN' WHERE id = ${c.id}`;
         await sql`UPDATE "WheelCycle" SET "totalPremium" = "totalPremium" + ${Number(c.premium)} WHERE id = ${c.cycleId}`;
         await logDb("TRADE", `ORDER FILLED: ${c.symbol} | Premium: $${Number(c.premium).toFixed(2)}`, undefined);
+      } else if (["canceled", "expired", "rejected", "not_found"].includes(alpacaStatus)) {
+        const reason = rejectReason || alpacaStatus;
+        log(`RECONCILE: ${c.symbol} PENDING → CANCELED (${reason})`);
+        await sql`UPDATE "Contract" SET status = 'CANCELED', "closedAt" = now(), "closedReason" = ${reason} WHERE id = ${c.id}`;
+        await logDb("WARN", `ORDER CANCELED: ${c.symbol} | Reason: ${reason}`, undefined);
+      } else if (!["pending_new", "accepted", "new", "held", "partially_filled"].includes(alpacaStatus)) {
+        // Unexpected status — log loudly, leave PENDING so it doesn't silently disappear
+        log(`RECONCILE: ${c.symbol} unexpected Alpaca order status '${alpacaStatus}' — leaving PENDING`);
+        await logDb("WARN", `RECONCILE: ${c.symbol} unexpected order status '${alpacaStatus}'`, undefined);
       }
+      // else: still active on Alpaca — leave PENDING
     }
 
     // Check PENDING_CLOSE contracts — if Alpaca no longer holds them, they filled
@@ -162,7 +195,7 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
       }
 
       // Expire old contracts
-      await sql`UPDATE "Contract" SET status = 'EXPIRED', "closedAt" = now(), "closedReason" = 'EXPIRATION' WHERE "cycleId" = ${cycle.id} AND status = 'OPEN' AND expiration < now()`;
+      await sql`UPDATE "Contract" SET status = 'EXPIRED', "closedAt" = now(), "closedReason" = 'EXPIRATION' WHERE "cycleId" = ${cycle.id} AND status IN ('OPEN', 'PENDING') AND expiration < now()`;
     }
 
     // ── 4. Regime-Aware Trade Dispatcher ──

@@ -19,6 +19,7 @@ interface TickerData {
   livePL: number | null;
   stockPrice: number;
   guardBlock: string | null;
+  flaggedForReview?: boolean;
   openContract: {
     type: string;
     strikePrice: number;
@@ -127,6 +128,43 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
         {ticker.openContract?.closedReason === "FAILED_CLOSE" && (
           <div className="bg-red-900/30 border border-red-800 rounded-lg px-3 py-2 mb-2 text-xs text-red-300">
             Close failed — position still open on Alpaca. Try closing again during market hours.
+          </div>
+        )}
+
+        {/* Flagged for review */}
+        {ticker.flaggedForReview && (
+          <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg px-3 py-2 mb-2 text-xs">
+            <div className="text-yellow-400 font-medium mb-1.5">No longer in top picks — review whether to keep</div>
+            <div className="flex gap-2">
+              <button
+                onClick={async (e) => {
+                  e.preventDefault();
+                  await fetch(`/api/tickers/${ticker.symbol}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ flaggedForReview: false }),
+                  });
+                  refreshAll();
+                }}
+                className="text-zinc-300 hover:text-white border border-zinc-600 hover:border-zinc-400 px-2.5 py-1 rounded-md transition-colors"
+              >
+                Keep Active
+              </button>
+              <button
+                onClick={async (e) => {
+                  e.preventDefault();
+                  await fetch(`/api/tickers/${ticker.symbol}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ active: false, flaggedForReview: false }),
+                  });
+                  refreshAll();
+                }}
+                className="text-yellow-400 hover:text-yellow-300 border border-yellow-700/50 hover:border-yellow-600 px-2.5 py-1 rounded-md transition-colors"
+              >
+                Deactivate
+              </button>
+            </div>
           </div>
         )}
 

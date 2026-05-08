@@ -7,14 +7,20 @@ export async function PATCH(
 ) {
   try {
     const { symbol } = await params;
-    const { allocation, strikePreference } = await request.json();
+    const body = await request.json();
+    const upper = symbol.toUpperCase();
 
-    const updates: string[] = [];
-    if (allocation !== undefined) {
-      await sql`UPDATE "Ticker" SET allocation = ${Number(allocation)} WHERE symbol = ${symbol.toUpperCase()}`;
+    if (body.allocation !== undefined) {
+      await sql`UPDATE "Ticker" SET allocation = ${Number(body.allocation)} WHERE symbol = ${upper}`;
     }
-    if (strikePreference !== undefined) {
-      await sql`UPDATE "Ticker" SET "strikePreference" = ${strikePreference} WHERE symbol = ${symbol.toUpperCase()}`;
+    if (body.strikePreference !== undefined) {
+      await sql`UPDATE "Ticker" SET "strikePreference" = ${body.strikePreference} WHERE symbol = ${upper}`;
+    }
+    if (body.active !== undefined) {
+      await sql`UPDATE "Ticker" SET active = ${Boolean(body.active)} WHERE symbol = ${upper}`;
+    }
+    if (body.flaggedForReview !== undefined) {
+      await sql`UPDATE "Ticker" SET "flaggedForReview" = ${Boolean(body.flaggedForReview)} WHERE symbol = ${upper}`;
     }
 
     return NextResponse.json({ success: true });

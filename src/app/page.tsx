@@ -7,7 +7,8 @@ import { RunTickButton } from "./components/RunTickButton";
 import { RegimeBadge } from "./components/RegimeBadge";
 import { CapitalBar } from "./components/CapitalBar";
 import { CandidatesCard } from "./components/CandidatesCard";
-import { useTickers } from "@/lib/hooks";
+import { PendingApprovalsCard } from "./components/PendingApprovalsCard";
+import { useTickers, useCandidates } from "@/lib/hooks";
 
 interface TickerData {
   id: string;
@@ -21,6 +22,7 @@ interface TickerData {
   livePL: number | null;
   stockPrice: number;
   guardBlock: string | null;
+  flaggedForReview?: boolean;
   openContract: null | {
     type: string;
     strikePrice: number;
@@ -34,6 +36,8 @@ interface TickerData {
 
 export default function Home() {
   const { data: tickers, isLoading } = useTickers();
+  const { data: candData } = useCandidates();
+  const proposedCount: number = candData?.proposedCount ?? 0;
 
   const allTickers: TickerData[] = tickers || [];
   const active = allTickers.filter((t) => t.openContract);
@@ -41,8 +45,16 @@ export default function Home() {
 
   return (
     <div className="space-y-6">
-      {/* Market regime */}
-      <RegimeBadge />
+      {/* Market regime + approval badge */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1"><RegimeBadge /></div>
+        {proposedCount > 0 && (
+          <a href="#pending-approvals" className="flex items-center gap-1.5 bg-yellow-500/10 border border-yellow-700/50 text-yellow-400 text-xs font-medium px-3 py-1.5 rounded-lg hover:bg-yellow-500/20 transition-colors shrink-0">
+            <span className="bg-yellow-500 text-black text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center">{proposedCount}</span>
+            pending approval{proposedCount !== 1 ? "s" : ""}
+          </a>
+        )}
+      </div>
 
       {/* Portfolio overview */}
       <section>
@@ -54,6 +66,17 @@ export default function Home() {
 
       {/* Capital deployment */}
       <CapitalBar />
+
+      {/* Pending approvals */}
+      {proposedCount > 0 && (
+        <section id="pending-approvals">
+          <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-3">
+            Pending Approvals
+            <span className="ml-2 bg-yellow-500 text-black text-[10px] font-bold px-1.5 py-0.5 rounded-full">{proposedCount}</span>
+          </h2>
+          <PendingApprovalsCard />
+        </section>
+      )}
 
       {/* Weekly picks */}
       <section>
