@@ -14,6 +14,7 @@ const publicApiPaths = [
   "/api/bot/morning",
   "/api/admin/migrate",
   "/api/admin/audit-pnl",
+  "/api/admin/audit-account",
   "/api/admin/verify-pnl",
 ];
 

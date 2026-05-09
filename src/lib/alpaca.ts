@@ -202,6 +202,55 @@ export async function cancelOrder(orderId: string) {
   return api<void>(`/v2/orders/${orderId}`, { method: "DELETE" });
 }
 
+// ── Account Activities ───────────────────────────────────
+
+export interface AlpacaActivity {
+  id: string;
+  activity_type: string;
+  transaction_time?: string;
+  date?: string;
+  type?: string;
+  // Trade fields (FILL)
+  price?: string;
+  qty?: string;
+  side?: "buy" | "sell";
+  symbol?: string;
+  order_id?: string;
+  // Non-trade fields
+  net_amount?: string;
+  description?: string;
+  // Catch-all
+  [key: string]: unknown;
+}
+
+/**
+ * Pull every account activity from Alpaca with full pagination.
+ * Used by the account-level audit endpoint.
+ */
+export async function getAccountActivities(
+  activityTypes?: string[]
+): Promise<AlpacaActivity[]> {
+  const all: AlpacaActivity[] = [];
+  let pageToken: string | undefined;
+  // Defensive cap so we never spin forever if pagination misbehaves
+  for (let i = 0; i < 200; i++) {
+    const params = new URLSearchParams();
+    params.set("page_size", "100");
+    if (activityTypes && activityTypes.length > 0) {
+      params.set("activity_types", activityTypes.join(","));
+    }
+    if (pageToken) params.set("page_token", pageToken);
+
+    const batch = await api<AlpacaActivity[]>(`/v2/account/activities?${params.toString()}`);
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    all.push(...batch);
+    if (batch.length < 100) break; // last page
+    // Alpaca paginates by passing the last id of the previous page
+    pageToken = String(batch[batch.length - 1].id);
+  }
+  return all;
+}
+
 // ── Options Orders ───────────────────────────────────────
 
 export async function submitOptionOrder(params: {

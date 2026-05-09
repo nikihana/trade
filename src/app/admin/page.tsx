@@ -124,6 +124,8 @@ export default function AdminPage() {
 
   const [auditReport, setAuditReport] = useState<string | null>(null);
   const [auditLoading, setAuditLoading] = useState(false);
+  const [accountAuditReport, setAccountAuditReport] = useState<string | null>(null);
+  const [accountAuditLoading, setAccountAuditLoading] = useState(false);
   const [verifyLoading, setVerifyLoading] = useState(false);
 
   const [migrateResult, setMigrateResult] = useState<string | null>(null);
@@ -191,6 +193,20 @@ export default function AdminPage() {
       setAuditReport(err instanceof Error ? err.message : "Audit failed");
     } finally {
       setAuditLoading(false);
+    }
+  }
+
+  async function runAccountAudit() {
+    setAccountAuditLoading(true);
+    setAccountAuditReport(null);
+    try {
+      const res = await fetch("/api/admin/audit-account");
+      const text = await res.text();
+      setAccountAuditReport(text);
+    } catch (err) {
+      setAccountAuditReport(err instanceof Error ? err.message : "Account audit failed");
+    } finally {
+      setAccountAuditLoading(false);
     }
   }
 
@@ -304,7 +320,16 @@ export default function AdminPage() {
             disabled={auditLoading}
             className="flex-1 py-2 rounded-lg text-xs font-medium bg-zinc-700 hover:bg-zinc-600 text-white disabled:opacity-50"
           >
-            {auditLoading ? "Running…" : "Run audit"}
+            <div>{auditLoading ? "Running…" : "Run audit"}</div>
+            <div className="text-[10px] opacity-70 font-normal">contracts vs orders</div>
+          </button>
+          <button
+            onClick={runAccountAudit}
+            disabled={accountAuditLoading}
+            className="flex-1 py-2 rounded-lg text-xs font-medium bg-zinc-700 hover:bg-zinc-600 text-white disabled:opacity-50"
+          >
+            <div>{accountAuditLoading ? "Running…" : "Run account audit"}</div>
+            <div className="text-[10px] opacity-70 font-normal">cash vs activities</div>
           </button>
           <button
             onClick={markVerified}
@@ -317,6 +342,11 @@ export default function AdminPage() {
         {auditReport && (
           <pre className="mt-3 rounded-lg bg-zinc-900 border border-zinc-700 p-3 text-[11px] font-mono text-zinc-300 whitespace-pre-wrap overflow-x-auto max-h-96 overflow-y-auto">
             {auditReport}
+          </pre>
+        )}
+        {accountAuditReport && (
+          <pre className="mt-3 rounded-lg bg-zinc-900 border border-zinc-700 p-3 text-[11px] font-mono text-zinc-300 whitespace-pre-wrap overflow-x-auto max-h-96 overflow-y-auto">
+            {accountAuditReport}
           </pre>
         )}
       </Section>
