@@ -65,26 +65,23 @@ function realizedPLContribution(
   premium: number,
   closePrice: number | null
 ): number {
-  // PENDING_CLOSE → CLOSED reconciler (Sites A & B): closedReason carries
-  // forward as 'MANUAL' from when the close was queued. The market-hours
-  // liquidate path (Site C.2) also sets closedReason = 'MANUAL'.
-  if (status === "CLOSED" && closedReason === "MANUAL") {
+  // CLOSED via the PENDING_CLOSE → CLOSED reconciler: realizedPL gets
+  // += (premium - closePrice). The reconciler doesn't filter on closedReason,
+  // so all of MANUAL, STOP_LOSS, PROFIT_TARGET flow through this path.
+  if (
+    status === "CLOSED" &&
+    (closedReason === "MANUAL" ||
+      closedReason === "STOP_LOSS" ||
+      closedReason === "PROFIT_TARGET")
+  ) {
     return premium - (closePrice ?? 0);
   }
-  // PENDING cancellation (Site C.1) — order never filled, no money changed hands
+  // PENDING cancellation — order never filled, no money changed hands
   if (status === "CLOSED" && closedReason === "CANCELLED") return 0;
   // Worthless expiry — production sweep does not touch realizedPL
   if (status === "EXPIRED" && closedReason === "EXPIRATION") return 0;
   // Assignment — handled by cycle-level call-away logic (Site D), not per-contract
   if (status === "ASSIGNED") return 0;
-  // STOP_LOSS / PROFIT_TARGET — production currently does NOT update realizedPL
-  // (known gap, deferred). Mirror production so audit reports zero drift.
-  if (
-    status === "CLOSED" &&
-    (closedReason === "STOP_LOSS" || closedReason === "PROFIT_TARGET")
-  ) {
-    return 0;
-  }
   // Anything else: zero contribution. The caller should flag for review.
   return 0;
 }
@@ -97,8 +94,9 @@ function realizedPLContribution(
  */
 export async function GET() {
   try {
-    // Suspect rows: CLOSED via MANUAL with $0/NULL closePrice (the actual
-    // corruption shape) OR half-written PENDING_CLOSE OR FAILED_CLOSE.
+    // Suspect rows: CLOSED via the realizedPL-contributing path (MANUAL,
+    // STOP_LOSS, PROFIT_TARGET) with $0/NULL closePrice (the actual corruption
+    // shape) OR half-written PENDING_CLOSE OR FAILED_CLOSE.
     // CANCELLED/EXPIRATION rows with closePrice=0 are NOT suspect — production
     // intentionally writes 0 there and never touches realizedPL.
     const suspectRows = await sql`
@@ -107,30 +105,20 @@ export async function GET() {
              "alpacaOrderId", premium, type
       FROM "Contract"
       WHERE
-        (status = 'CLOSED' AND "closedReason" = 'MANUAL'
+        (status = 'CLOSED'
+          AND "closedReason" IN ('MANUAL', 'STOP_LOSS', 'PROFIT_TARGET')
           AND ("closePrice" = 0 OR "closePrice" IS NULL))
         OR (status = 'PENDING_CLOSE' AND "closedAt" IS NOT NULL)
         OR ("closedReason" = 'FAILED_CLOSE')
       ORDER BY "closedAt" DESC NULLS LAST
     `;
 
-    // Production formula gaps: contracts that closed via STOP_LOSS or
-    // PROFIT_TARGET. Production never updates realizedPL on these paths.
-    const formulaGapRows = await sql`
-      SELECT id, symbol, "cycleId", "closedReason", premium, "closePrice"
-      FROM "Contract"
-      WHERE status = 'CLOSED'
-        AND "closedReason" IN ('STOP_LOSS', 'PROFIT_TARGET')
-      ORDER BY "closedAt" DESC NULLS LAST
-    `;
-    const gapRows: FormulaGapRow[] = formulaGapRows.map((r) => ({
-      contractId: String(r.id),
-      symbol: String(r.symbol),
-      cycleId: String(r.cycleId),
-      closedReason: String(r.closedReason),
-      premium: Number(r.premium),
-      closePrice: r.closePrice !== null ? Number(r.closePrice) : null,
-    }));
+    // Production formula gaps: previously tracked STOP_LOSS / PROFIT_TARGET
+    // not propagating to realizedPL. That gap was closed (tick-engine.ts now
+    // marks them PENDING_CLOSE and the reconciler handles realizedPL). No
+    // currently known gaps remain. Section retained as a stub so future gaps
+    // have a documented home.
+    const gapRows: FormulaGapRow[] = [];
 
     const totalContracts = (await sql`SELECT COUNT(*) AS c FROM "Contract"`)[0].c;
 
@@ -365,16 +353,8 @@ function renderReport(
   // Production-gap section — surfaces deferred bugs every time the audit runs
   lines.push(`### Production formula gaps`);
   lines.push(``);
-  lines.push(
-    `STOP_LOSS and PROFIT_TARGET close paths in tick-engine.ts (lines 165, 185) ` +
-    `set Contract.status = 'CLOSED' but do NOT update WheelCycle.realizedPL. ` +
-    `When either path fires on a real position, the cycle's P&L will be silently wrong.`
-  );
-  lines.push(``);
   if (formulaGapRows.length === 0) {
-    lines.push(
-      `**Exercised rows:** 0 — STOP_LOSS / PROFIT_TARGET realizedPL update is a known production gap that has not yet fired on real data.`
-    );
+    lines.push(`No known production formula gaps.`);
   } else {
     lines.push(`**Exercised rows:** ${formulaGapRows.length}`);
     lines.push(``);

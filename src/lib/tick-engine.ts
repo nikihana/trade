@@ -162,8 +162,9 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
               }
               const closeCost = q.midPrice * 100;
               await submitOptionOrder({ symbol: contract.symbol as string, qty: 1, side: "buy", type: "limit", time_in_force: "gtc", limit_price: q.askPrice > 0 ? q.askPrice : q.midPrice });
-              await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${closeCost}, "closedReason" = 'STOP_LOSS' WHERE id = ${contract.id}`;
-              await logDb("TRADE", `STOP-LOSS: Closed ${contract.symbol} at $${closeCost.toFixed(2)}`, symbol, stopLoss.data);
+              // Mark PENDING_CLOSE so the reconciler updates realizedPL once Alpaca confirms the fill.
+              await sql`UPDATE "Contract" SET status = 'PENDING_CLOSE', "closePrice" = ${closeCost}, "closedReason" = 'STOP_LOSS' WHERE id = ${contract.id}`;
+              await logDb("TRADE", `STOP-LOSS QUEUED: ${contract.symbol} at est $${closeCost.toFixed(2)}`, symbol, stopLoss.data);
               continue;
             }
           }
@@ -182,8 +183,9 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
           if (profitPct >= profitTarget) {
             log(`${symbol}: ${profitTarget}% profit hit (${profitPct.toFixed(0)}%), closing`);
             await submitOptionOrder({ symbol: contract.symbol as string, qty: 1, side: "buy", type: "limit", time_in_force: "gtc", limit_price: q.askPrice > 0 ? q.askPrice : q.midPrice });
-            await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${currentCost}, "closedReason" = 'PROFIT_TARGET' WHERE id = ${contract.id}`;
-            await logDb("TRADE", `CLOSED at ${profitTarget}% profit: ${contract.symbol}`, symbol);
+            // Mark PENDING_CLOSE so the reconciler updates realizedPL once Alpaca confirms the fill.
+            await sql`UPDATE "Contract" SET status = 'PENDING_CLOSE', "closePrice" = ${currentCost}, "closedReason" = 'PROFIT_TARGET' WHERE id = ${contract.id}`;
+            await logDb("TRADE", `PROFIT_TARGET QUEUED at ${profitTarget}% (${profitPct.toFixed(0)}%): ${contract.symbol}`, symbol);
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
