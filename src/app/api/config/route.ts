@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAllConfig, setConfig } from "@/lib/config";
+import { requireAdmin } from "@/lib/admin-guard";
 
 export async function GET() {
+  const denied = await requireAdmin();
+  if (denied) return denied;
   try {
     const config = await getAllConfig();
     return NextResponse.json(config);
@@ -11,6 +14,8 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
+  const denied = await requireAdmin();
+  if (denied) return denied;
   try {
     const updates: { key: string; value: string }[] = await request.json();
 

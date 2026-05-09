@@ -1,12 +1,17 @@
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
+import { requireAdmin } from "@/lib/admin-guard";
 
 /**
  * POST /api/admin/migrate
  * Run schema migrations. Safe to call multiple times (IF NOT EXISTS guards).
+ * Admin-only.
  */
 export async function POST() {
+  const denied = await requireAdmin();
+  if (denied) return denied;
   try {
+    await sql`ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "isAdmin" BOOLEAN NOT NULL DEFAULT false`;
     await sql`ALTER TABLE "Candidate" ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'proposed'`;
     await sql`ALTER TABLE "Candidate" ADD COLUMN IF NOT EXISTS "yieldRank" integer`;
     await sql`ALTER TABLE "Ticker" ADD COLUMN IF NOT EXISTS "flaggedForReview" boolean NOT NULL DEFAULT false`;

@@ -90,10 +90,7 @@ export default function LoginPage() {
         </form>
 
         <p className="text-center text-xs text-zinc-600">
-          First time?{" "}
-          <a href="/setup" className="text-blue-500 hover:text-blue-400">
-            Set up your password
-          </a>
+          By invitation only
         </p>
       </div>
     </div>

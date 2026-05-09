@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
 interface ConfigRow {
   key: string;
@@ -67,6 +69,8 @@ const categories: { title: string; keys: string[] }[] = [
 const fullWidthKeys = new Set(["healthcheck_url", "cron_schedule", "approved_tickers"]);
 
 export default function ConfigPage() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
   const [config, setConfig] = useState<ConfigRow[]>([]);
   const [values, setValues] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -74,7 +78,16 @@ export default function ConfigPage() {
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
+  // Non-admins get bounced to the dashboard. Admin check runs once session
+  // resolves; while it's loading we render nothing rather than flash the page.
   useEffect(() => {
+    if (status === "authenticated" && !session?.user?.isAdmin) {
+      router.replace("/");
+    }
+  }, [status, session, router]);
+
+  useEffect(() => {
+    if (status !== "authenticated" || !session?.user?.isAdmin) return;
     fetch("/api/config")
       .then((r) => r.json())
       .then((data) => {
@@ -87,7 +100,12 @@ export default function ConfigPage() {
         setLoading(false);
       })
       .catch(() => setLoading(false));
-  }, []);
+  }, [status, session]);
+
+  // Block render until we've confirmed admin (avoids a flash of config UI)
+  if (status === "loading" || (status === "authenticated" && !session?.user?.isAdmin)) {
+    return null;
+  }
 
   async function handleSave() {
     setSaving(true);

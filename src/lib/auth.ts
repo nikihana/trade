@@ -15,7 +15,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (!credentials?.email || !credentials?.password) return null;
 
         const rows = await sql`
-          SELECT id, email, name, "hashedPassword"
+          SELECT id, email, name, "hashedPassword", COALESCE("isAdmin", false) AS "isAdmin"
           FROM "User"
           WHERE email = ${credentials.email as string}
         `;
@@ -30,7 +30,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         if (!valid) return null;
 
-        return { id: user.id as string, email: user.email as string, name: user.name as string };
+        return {
+          id: user.id as string,
+          email: user.email as string,
+          name: user.name as string,
+          isAdmin: Boolean(user.isAdmin),
+        };
       },
     }),
   ],
@@ -39,15 +44,25 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     signIn: "/login",
   },
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
         token.id = user.id;
+        token.isAdmin = (user as { isAdmin?: boolean }).isAdmin ?? false;
+      }
+      // Refresh isAdmin from DB on session update (lets pre-existing sessions
+      // pick up the new flag without forcing re-login).
+      if (trigger === "update" || (token.id && token.isAdmin === undefined)) {
+        const rows = await sql`
+          SELECT COALESCE("isAdmin", false) AS "isAdmin" FROM "User" WHERE id = ${token.id as string}
+        `;
+        token.isAdmin = Boolean(rows[0]?.isAdmin);
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user && token.id) {
         session.user.id = token.id as string;
+        session.user.isAdmin = Boolean(token.isAdmin);
       }
       return session;
     },

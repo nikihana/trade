@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { getOrders } from "@/lib/alpaca";
+import { requireAdmin } from "@/lib/admin-guard";
 
 interface SuspectRow {
   id: string;
@@ -93,6 +94,8 @@ function realizedPLContribution(
  * Does NOT auto-correct anything.
  */
 export async function GET() {
+  const denied = await requireAdmin();
+  if (denied) return denied;
   try {
     // Suspect rows: CLOSED via the realizedPL-contributing path (MANUAL,
     // STOP_LOSS, PROFIT_TARGET) with $0/NULL closePrice (the actual corruption

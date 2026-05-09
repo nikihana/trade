@@ -3,20 +3,23 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { signOut } from "next-auth/react";
+import { signOut, useSession } from "next-auth/react";
 
-const navItems = [
+const baseNavItems = [
   { href: "/", label: "Dashboard" },
   { href: "/trades", label: "Trades" },
   { href: "/summary", label: "Summary" },
-  { href: "/config", label: "Config" },
 ];
+const adminNavItems = [{ href: "/config", label: "Config" }];
 
 export function NavBar() {
   const pathname = usePathname();
+  const { data: session } = useSession();
+  const isAdmin = Boolean(session?.user?.isAdmin);
+  const navItems = isAdmin ? [...baseNavItems, ...adminNavItems] : baseNavItems;
 
-  // Hide nav on login/setup pages
-  if (pathname === "/login" || pathname === "/setup") return null;
+  // Hide nav on login page
+  if (pathname === "/login") return null;
 
   return (
     <>
