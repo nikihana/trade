@@ -19,6 +19,16 @@ interface ParsedActivity {
   notes: string;
 }
 
+interface MismatchRow {
+  symbol: string;
+  side: string; // "sell" or "buy"
+  dbPricePerShare: number;
+  alpacaPricePerShare: number;
+  qty: number;
+  deltaPerShare: number; // alpaca - db (signed)
+  deltaTotal: number; // signed cash impact relative to DB's view
+}
+
 /**
  * Parse one Alpaca activity into a normalized cash-effect row.
  * Returns null for activities that don't affect cash.
@@ -31,13 +41,15 @@ function parseActivity(a: AlpacaActivity, contractsBySymbol: Map<string, { id: s
   if (t === "FILL") {
     const price = a.price ? parseFloat(a.price) : 0;
     const qty = a.qty ? parseFloat(a.qty) : 0;
-    const side = a.side || "";
+    const side = (a.side || "").toLowerCase();
     // Options: price is per-share, qty is contracts, multiplier is 100
     // Stocks (assignment / call-away): price is per-share, qty is shares, no multiplier
     const isOption = /^[A-Z]+\d{6}[PC]\d{8}$/.test(symbol);
     const multiplier = isOption ? 100 : 1;
     const gross = price * qty * multiplier;
-    const cashEffect = side === "sell" ? gross : -gross;
+    // Sells (sell, sell_short) credit cash; buys (buy, buy_to_cover) debit it.
+    const isSell = side.startsWith("sell");
+    const cashEffect = isSell ? gross : -gross;
 
     const dbMatch = contractsBySymbol.get(symbol) ?? [];
     const matchedContract = dbMatch.length > 0 ? dbMatch[0].id : null;
@@ -53,7 +65,7 @@ function parseActivity(a: AlpacaActivity, contractsBySymbol: Map<string, { id: s
       price,
       qty,
       cashEffect,
-      description: `${side === "sell" ? "+" : "-"}${(price * multiplier).toFixed(2)} × ${qty}`,
+      description: `${isSell ? "+" : "-"}${(price * multiplier).toFixed(2)} × ${qty}`,
       matchedContract,
       notes,
     };
@@ -111,6 +123,51 @@ export async function GET() {
 
     const parsed = activities.map((a) => parseActivity(a, contractsBySymbol));
 
+    // Detect amount mismatches between Alpaca FILLs and matched DB contracts.
+    // For each FILL with a DB match, compare the actual fill price (per share)
+    // against the DB-stored per-share equivalent.
+    const mismatches: MismatchRow[] = [];
+    for (const a of activities) {
+      if (a.activity_type !== "FILL") continue;
+      const symbol = a.symbol || "";
+      if (!/^[A-Z]+\d{6}[PC]\d{8}$/.test(symbol)) continue;
+      const matches = contractsBySymbol.get(symbol);
+      if (!matches || matches.length === 0) continue;
+      const c = matches[0]; // assume one contract per symbol per cycle
+      const side = (a.side || "").toLowerCase();
+      const isSell = side.startsWith("sell");
+      const alpacaPerShare = a.price ? parseFloat(a.price) : 0;
+      const qty = a.qty ? parseFloat(a.qty) : 1;
+
+      const dbPerShare = isSell
+        ? Number(c.premium) / 100 / qty
+        : (c.closePrice ?? 0) / 100 / qty;
+      if (dbPerShare === 0) continue; // not yet recorded; skip
+
+      const deltaPerShare = alpacaPerShare - dbPerShare;
+      if (Math.abs(deltaPerShare) <= 0.01) continue;
+
+      // Cash impact relative to DB's view: sells where actual < expected
+      // mean less cash received than DB recorded → negative impact. Buys
+      // where actual > expected mean more cash spent than DB recorded →
+      // also negative. So:
+      //   sell: impact = (actual - expected) * 100 * qty
+      //   buy:  impact = -(actual - expected) * 100 * qty
+      const deltaTotal = isSell
+        ? deltaPerShare * 100 * qty
+        : -(deltaPerShare * 100 * qty);
+
+      mismatches.push({
+        symbol,
+        side: isSell ? "sell" : "buy",
+        dbPricePerShare: dbPerShare,
+        alpacaPricePerShare: alpacaPerShare,
+        qty,
+        deltaPerShare,
+        deltaTotal,
+      });
+    }
+
     // Alpaca-side trajectory
     const alpacaCurrentCash = account.cash;
     const alpacaNetChange = parsed.reduce((s, p) => s + p.cashEffect, 0);
@@ -164,6 +221,7 @@ export async function GET() {
       untrackedFills,
       otherTotal,
       trackedFillTotal,
+      mismatches,
     });
 
     return new NextResponse(md, { headers: { "content-type": "text/markdown" } });
@@ -201,6 +259,7 @@ function renderReport(d: {
   untrackedFills: ParsedActivity[];
   otherTotal: number;
   trackedFillTotal: number;
+  mismatches: MismatchRow[];
 }): string {
   const lines: string[] = [];
   lines.push(`## Account reconciliation`);
@@ -258,6 +317,26 @@ function renderReport(d: {
   lines.push(`Categorization residual:  ${fmt(d.alpacaNetChange - accounted)}  ${Math.abs(d.alpacaNetChange - accounted) < 0.01 ? "✓" : "(unexplained — fix categorization)"}`);
   lines.push("```");
   lines.push(``);
+
+  // Amount mismatches between DB and Alpaca
+  lines.push(`## Amount mismatches between DB and Alpaca`);
+  lines.push(``);
+  if (d.mismatches.length === 0) {
+    lines.push(`No mismatches over $0.01 per share. DB prices match Alpaca fills.`);
+    lines.push(``);
+  } else {
+    lines.push(`| Symbol | Side | DB price | Alpaca filled price | Δ per share | Δ total |`);
+    lines.push(`|--------|------|---------:|--------------------:|------------:|--------:|`);
+    for (const m of d.mismatches) {
+      lines.push(
+        `| ${m.symbol} | ${m.side} | $${m.dbPricePerShare.toFixed(3)} | $${m.alpacaPricePerShare.toFixed(3)} | ${m.deltaPerShare >= 0 ? "+" : ""}${m.deltaPerShare.toFixed(3)} | ${fmt(m.deltaTotal)} |`
+      );
+    }
+    const total = d.mismatches.reduce((s, m) => s + m.deltaTotal, 0);
+    lines.push(``);
+    lines.push(`**Total P&L impact (sum of Δ totals):** ${fmt(total)}`);
+    lines.push(``);
+  }
 
   if (d.untrackedFills.length > 0) {
     lines.push(`## Suspect untracked fills`);

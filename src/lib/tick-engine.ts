@@ -70,8 +70,10 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
 
       let alpacaStatus = "";
       let rejectReason = "";
+      let orderForRow: Record<string, unknown> | null = null;
       try {
         const order = await getOrder(orderId) as Record<string, unknown>;
+        orderForRow = order;
         alpacaStatus = String(order.status || "");
         rejectReason = order.reject_reason ? String(order.reject_reason) : alpacaStatus;
       } catch (e) {
@@ -86,10 +88,22 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
       }
 
       if (alpacaStatus === "filled") {
-        log(`RECONCILE: ${c.symbol} PENDING → OPEN (order filled)`);
-        await sql`UPDATE "Contract" SET status = 'OPEN' WHERE id = ${c.id}`;
-        await sql`UPDATE "WheelCycle" SET "totalPremium" = "totalPremium" + ${Number(c.premium)} WHERE id = ${c.cycleId}`;
-        await logDb("TRADE", `ORDER FILLED: ${c.symbol} | Premium: $${Number(c.premium).toFixed(2)}`, undefined);
+        // Source of truth: filled_avg_price from the Alpaca order, not the
+        // mid-quote estimate we wrote at submission time. The estimate may
+        // be off by cents; the limit price is a ceiling/floor, not the fill.
+        let actualPremium = Number(c.premium);
+        const orderObj = orderForRow as Record<string, unknown> | null;
+        const filledAvg = orderObj?.filled_avg_price;
+        const filledQty = orderObj?.filled_qty;
+        if (filledAvg) {
+          const price = parseFloat(String(filledAvg));
+          const q = filledQty ? parseFloat(String(filledQty)) : 1;
+          if (price > 0 && q > 0) actualPremium = price * q * 100;
+        }
+        log(`RECONCILE: ${c.symbol} PENDING → OPEN (filled @ $${actualPremium.toFixed(2)})`);
+        await sql`UPDATE "Contract" SET status = 'OPEN', premium = ${actualPremium} WHERE id = ${c.id}`;
+        await sql`UPDATE "WheelCycle" SET "totalPremium" = "totalPremium" + ${actualPremium} WHERE id = ${c.cycleId}`;
+        await logDb("TRADE", `ORDER FILLED: ${c.symbol} | Premium: $${actualPremium.toFixed(2)}`, undefined);
       } else if (["canceled", "expired", "rejected", "not_found"].includes(alpacaStatus)) {
         const reason = rejectReason || alpacaStatus;
         log(`RECONCILE: ${c.symbol} PENDING → CANCELED (${reason})`);
@@ -103,16 +117,39 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
       // else: still active on Alpaca — leave PENDING
     }
 
-    // Check PENDING_CLOSE contracts — if Alpaca no longer holds them, they filled
+    // Check PENDING_CLOSE contracts — if Alpaca no longer holds them, the
+    // buy-to-close filled. Source of truth for closePrice is Alpaca's
+    // filled_avg_price on the matching buy order, not the mid-quote estimate
+    // written at submission time.
     const pendingCloses = await sql`SELECT c.id, c.symbol, c.premium, c."closePrice", c."cycleId" FROM "Contract" c WHERE c.status = 'PENDING_CLOSE'`;
+    let closeOrdersCache: Record<string, unknown>[] | null = null;
     for (const c of pendingCloses) {
       if (!alpacaSymbolSet.has(c.symbol as string)) {
-        const netPL = Number(c.premium) - Number(c.closePrice || 0);
-        log(`RECONCILE: ${c.symbol} PENDING_CLOSE filled — P&L: $${netPL.toFixed(2)}`);
-        await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now() WHERE id = ${c.id}`;
+        if (closeOrdersCache === null) {
+          try {
+            closeOrdersCache = (await getOrders("all", 200)) as Record<string, unknown>[];
+          } catch {
+            closeOrdersCache = [];
+          }
+        }
+        const sym = c.symbol as string;
+        const buys = closeOrdersCache.filter(
+          (o) => o.symbol === sym && String(o.side).toLowerCase() === "buy" && o.status === "filled" && o.filled_avg_price
+        );
+        let actualClosePrice = Number(c.closePrice || 0);
+        if (buys.length > 0) {
+          buys.sort((a, b) => String(b.filled_at || "").localeCompare(String(a.filled_at || "")));
+          const latest = buys[0];
+          const price = parseFloat(String(latest.filled_avg_price));
+          const qty = latest.filled_qty ? parseFloat(String(latest.filled_qty)) : 1;
+          if (price > 0 && qty > 0) actualClosePrice = price * qty * 100;
+        }
+        const netPL = Number(c.premium) - actualClosePrice;
+        log(`RECONCILE: ${c.symbol} PENDING_CLOSE filled @ $${actualClosePrice.toFixed(2)} — P&L: $${netPL.toFixed(2)}`);
+        await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${actualClosePrice} WHERE id = ${c.id}`;
         await sql`UPDATE "WheelCycle" SET "realizedPL" = "realizedPL" + ${netPL}, "completedAt" = now() WHERE id = ${c.cycleId}`;
         await sql`UPDATE "Ticker" SET active = false WHERE id IN (SELECT "tickerId" FROM "WheelCycle" WHERE id = ${c.cycleId})`;
-        await logDb("TRADE", `CLOSE FILLED: ${c.symbol} | P&L: $${netPL.toFixed(2)}`, undefined);
+        await logDb("TRADE", `CLOSE FILLED: ${c.symbol} @ $${actualClosePrice.toFixed(2)} | P&L: $${netPL.toFixed(2)}`, undefined);
       }
     }
 

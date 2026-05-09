@@ -8,25 +8,43 @@ import { requireAdmin } from "@/lib/admin-guard";
 
 export async function GET() {
   try {
-    // Lightweight reconciliation on page load
+    // Lightweight reconciliation on page load — same source-of-truth rule as
+    // the tick engine: closePrice comes from Alpaca's filled_avg_price.
     try {
       const alpacaPositions = await getPositions();
       const alpacaSymbols = new Set(
         alpacaPositions.filter((p) => p.qty < 0).map((p) => p.symbol)
       );
 
-      // Check PENDING_CLOSE contracts — if Alpaca no longer holds them, they filled
       const pendingCloses = await sql`
         SELECT c.id, c.symbol, c.premium, c."closePrice", c."cycleId"
         FROM "Contract" c WHERE c.status = 'PENDING_CLOSE'
       `;
+      let closeOrdersCache: Record<string, unknown>[] | null = null;
       for (const c of pendingCloses) {
         if (!alpacaSymbols.has(c.symbol as string)) {
-          // Position gone — close order filled
-          const netPL = Number(c.premium) - Number(c.closePrice || 0);
-          await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now() WHERE id = ${c.id}`;
+          if (closeOrdersCache === null) {
+            try {
+              closeOrdersCache = (await getOrders("all", 200)) as Record<string, unknown>[];
+            } catch {
+              closeOrdersCache = [];
+            }
+          }
+          const sym = c.symbol as string;
+          const buys = closeOrdersCache.filter(
+            (o) => o.symbol === sym && String(o.side).toLowerCase() === "buy" && o.status === "filled" && o.filled_avg_price
+          );
+          let actualClosePrice = Number(c.closePrice || 0);
+          if (buys.length > 0) {
+            buys.sort((a, b) => String(b.filled_at || "").localeCompare(String(a.filled_at || "")));
+            const latest = buys[0];
+            const price = parseFloat(String(latest.filled_avg_price));
+            const qty = latest.filled_qty ? parseFloat(String(latest.filled_qty)) : 1;
+            if (price > 0 && qty > 0) actualClosePrice = price * qty * 100;
+          }
+          const netPL = Number(c.premium) - actualClosePrice;
+          await sql`UPDATE "Contract" SET status = 'CLOSED', "closedAt" = now(), "closePrice" = ${actualClosePrice} WHERE id = ${c.id}`;
           await sql`UPDATE "WheelCycle" SET "realizedPL" = "realizedPL" + ${netPL}, "completedAt" = now() WHERE id = ${c.cycleId}`;
-          // Deactivate ticker
           await sql`UPDATE "Ticker" SET active = false WHERE id IN (SELECT "tickerId" FROM "WheelCycle" WHERE id = ${c.cycleId})`;
         }
       }
