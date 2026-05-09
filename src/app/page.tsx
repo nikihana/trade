@@ -1,9 +1,8 @@
 "use client";
 
+import { useSession } from "next-auth/react";
 import { PortfolioCard } from "./components/PortfolioCard";
 import { TickerCard } from "./components/TickerCard";
-import { AddTickerDialog } from "./components/AddTickerDialog";
-import { RunTickButton } from "./components/RunTickButton";
 import { RegimeBadge } from "./components/RegimeBadge";
 import { CapitalBar } from "./components/CapitalBar";
 import { PendingApprovalsCard } from "./components/PendingApprovalsCard";
@@ -34,9 +33,11 @@ interface TickerData {
 }
 
 export default function Home() {
+  const { data: session } = useSession();
+  const isAdmin = Boolean(session?.user?.isAdmin);
   const { data: tickers, isLoading } = useTickers();
   const { data: candData } = useCandidates();
-  const proposedCount: number = candData?.proposedCount ?? 0;
+  const proposedCount: number = isAdmin ? candData?.proposedCount ?? 0 : 0;
 
   const allTickers: TickerData[] = tickers || [];
   const active = allTickers.filter((t) => t.openContract);
@@ -66,8 +67,8 @@ export default function Home() {
       {/* Capital deployment */}
       <CapitalBar />
 
-      {/* Pending approvals */}
-      {proposedCount > 0 && (
+      {/* Pending approvals — admin only */}
+      {isAdmin && proposedCount > 0 && (
         <section id="pending-approvals">
           <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-3">
             Pending Approvals
@@ -118,15 +119,10 @@ export default function Home() {
             ))}
           </div>
           <p className="text-xs text-zinc-600 mt-2">
-            These tickers are queued but no trade has been executed yet. Run a tick or wait for the next cron.
+            These tickers will be evaluated on the next cron tick.
           </p>
         </section>
       )}
-
-      <div className="space-y-3">
-        <AddTickerDialog />
-        <RunTickButton />
-      </div>
     </div>
   );
 }

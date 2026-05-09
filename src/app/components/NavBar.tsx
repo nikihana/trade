@@ -10,7 +10,7 @@ const baseNavItems = [
   { href: "/trades", label: "Trades" },
   { href: "/summary", label: "Summary" },
 ];
-const adminNavItems = [{ href: "/config", label: "Config" }];
+const adminNavItems = [{ href: "/admin", label: "Admin" }];
 
 export function NavBar() {
   const pathname = usePathname();

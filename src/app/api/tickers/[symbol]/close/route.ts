@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import { sql, genId } from "@/lib/db";
 import { liquidatePosition, submitOptionOrder, getOptionQuote, cancelOrder, getOrders } from "@/lib/alpaca";
 import { isMarketHours } from "@/lib/utils";
+import { requireAdmin } from "@/lib/admin-guard";
 
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ symbol: string }> }
 ) {
+  const denied = await requireAdmin();
+  if (denied) return denied;
   try {
     const { symbol } = await params;
     const upper = symbol.toUpperCase();

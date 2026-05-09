@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useSession } from "next-auth/react";
 import { WheelStageIndicator } from "./WheelStageIndicator";
 import { CloseConfirmModal } from "./CloseConfirmModal";
 import { EditAllocationModal } from "./EditAllocationModal";
@@ -51,6 +52,8 @@ const strikeLabels: Record<string, string> = {
 };
 
 export function TickerCard({ ticker }: { ticker: TickerData }) {
+  const { data: session } = useSession();
+  const isAdmin = Boolean(session?.user?.isAdmin);
   const [showClose, setShowClose] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
 
@@ -78,36 +81,38 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
               </span>
             )}
           </Link>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={(e) => { e.preventDefault(); setShowEdit(true); }}
-              className="text-xs text-zinc-500 hover:text-blue-400 transition-colors px-1.5 py-0.5 rounded hover:bg-blue-900/20"
-              title="Edit allocation"
-            >
-              Edit
-            </button>
-            {ticker.openContract ? (
+          {isAdmin && (
+            <div className="flex items-center gap-2">
               <button
-                onClick={(e) => { e.preventDefault(); setShowClose(true); }}
-                className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-1.5 py-0.5 rounded hover:bg-red-900/20"
-                title="Close position"
+                onClick={(e) => { e.preventDefault(); setShowEdit(true); }}
+                className="text-xs text-zinc-500 hover:text-blue-400 transition-colors px-1.5 py-0.5 rounded hover:bg-blue-900/20"
+                title="Edit allocation"
               >
-                Close
+                Edit
               </button>
-            ) : (
-              <button
-                onClick={async (e) => {
-                  e.preventDefault();
-                  await fetch(`/api/tickers/${ticker.symbol}`, { method: "DELETE" });
-                  refreshAll();
-                }}
-                className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-1.5 py-0.5 rounded hover:bg-red-900/20"
-                title="Remove"
-              >
-                Remove
-              </button>
-            )}
-          </div>
+              {ticker.openContract ? (
+                <button
+                  onClick={(e) => { e.preventDefault(); setShowClose(true); }}
+                  className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-1.5 py-0.5 rounded hover:bg-red-900/20"
+                  title="Close position"
+                >
+                  Close
+                </button>
+              ) : (
+                <button
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    await fetch(`/api/tickers/${ticker.symbol}`, { method: "DELETE" });
+                    refreshAll();
+                  }}
+                  className="text-xs text-zinc-500 hover:text-red-400 transition-colors px-1.5 py-0.5 rounded hover:bg-red-900/20"
+                  title="Remove"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Pending open banner */}
@@ -131,10 +136,11 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
           </div>
         )}
 
-        {/* Flagged for review */}
+        {/* Flagged for review — banner shown to all, action buttons admin-only */}
         {ticker.flaggedForReview && (
           <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg px-3 py-2 mb-2 text-xs">
             <div className="text-yellow-400 font-medium mb-1.5">No longer in top picks — review whether to keep</div>
+            {isAdmin && (
             <div className="flex gap-2">
               <button
                 onClick={async (e) => {
@@ -165,6 +171,7 @@ export function TickerCard({ ticker }: { ticker: TickerData }) {
                 Deactivate
               </button>
             </div>
+            )}
           </div>
         )}
 

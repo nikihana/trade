@@ -15,6 +15,7 @@ export function AddTickerDialog() {
   const [symbol, setSymbol] = useState("");
   const [allocation, setAllocation] = useState("");
   const [strikePreference, setStrikePreference] = useState("30-delta");
+  const [overrideGuards, setOverrideGuards] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -33,6 +34,7 @@ export function AddTickerDialog() {
           symbol: symbol.trim(),
           allocation: parseFloat(allocation),
           strikePreference,
+          override: overrideGuards,
         }),
       });
 
@@ -44,6 +46,7 @@ export function AddTickerDialog() {
       setSymbol("");
       setAllocation("");
       setStrikePreference("30-delta");
+      setOverrideGuards(false);
       setOpen(false);
       refreshAll();
     } catch (err) {
@@ -125,6 +128,16 @@ export function AddTickerDialog() {
           </select>
         </div>
       </div>
+
+      <label className="flex items-center gap-2 text-xs text-zinc-500 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={overrideGuards}
+          onChange={(e) => setOverrideGuards(e.target.checked)}
+          className="rounded border-zinc-600 bg-zinc-800 text-yellow-500 focus:ring-yellow-500"
+        />
+        Override guards (bypass risk caps, premium checks)
+      </label>
 
       {error && (
         <div className="bg-red-900/30 border border-red-800 rounded-lg p-2 text-red-300 text-xs">

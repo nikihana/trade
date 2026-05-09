@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { sql, genId } from "@/lib/db";
 import { getAccount } from "@/lib/alpaca";
+import { requireAdmin } from "@/lib/admin-guard";
 
 // Allocation weights by yield rank (1-based index)
 const YIELD_WEIGHTS = [0.30, 0.25, 0.20, 0.15, 0.10];
@@ -17,6 +18,8 @@ export async function POST(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const denied = await requireAdmin();
+  if (denied) return denied;
   try {
     const { id } = await params;
 

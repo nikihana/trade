@@ -4,6 +4,7 @@ import { getOptionQuote, getLatestQuote, getAccount, getPositions, getOrders } f
 import { checkTickerApproved, checkAvgVolume, checkPremiumRichness, checkRiskCap } from "@/lib/guards";
 import { findBestPut } from "@/lib/options";
 import { getConfigNum } from "@/lib/config";
+import { requireAdmin } from "@/lib/admin-guard";
 
 export async function GET() {
   try {
@@ -143,6 +144,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const denied = await requireAdmin();
+  if (denied) return denied;
   try {
     const { symbol, allocation, strikePreference } = await request.json();
     if (!symbol || typeof symbol !== "string") {
