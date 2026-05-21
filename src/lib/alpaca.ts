@@ -339,5 +339,10 @@ export async function getOptionQuote(
     throw new Error(`No bid/ask available for ${optionSymbol} (illiquid or expired)`);
   }
 
-  return { bidPrice: bp, askPrice: ap, midPrice: (bp + ap) / 2 };
+  // Only average when both sides are present. A one-sided quote (the other
+  // side missing/0) must use the live side directly — averaging against 0
+  // silently halves the price and corrupts premium/limit-price calculations.
+  const midPrice = bp > 0 && ap > 0 ? (bp + ap) / 2 : bp || ap;
+
+  return { bidPrice: bp, askPrice: ap, midPrice };
 }

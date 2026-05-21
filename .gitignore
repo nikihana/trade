@@ -49,3 +49,4 @@ prisma/dev.db-journal
 # bot status
 bot-status.json
 dev.db
+.env*.local
