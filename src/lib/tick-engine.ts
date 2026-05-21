@@ -277,6 +277,7 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
 
       for (const ticker of tickers) {
         const symbol = ticker.symbol as string;
+        try {
         let cycleId = ticker.cycleId as string | null;
 
         if (!cycleId) {
@@ -329,6 +330,11 @@ export async function runTickEngine(opts?: { override?: boolean }): Promise<{ su
               await execBearCallSpread(symbol, cycleId, regime.regime === MarketRegime.DEFENSIVE ? defensiveMaxDte : undefined, log, logDb);
               break;
           }
+        }
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          log(`${symbol}: skipped — ${msg}`);
+          await logDb("WARN", `Ticker skipped (tick error): ${msg}`, symbol);
         }
       }
 

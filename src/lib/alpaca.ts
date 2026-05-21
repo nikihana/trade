@@ -98,11 +98,22 @@ export async function getLatestQuote(
     DATA_URL
   );
   const quote = data.quote;
-  return {
-    lastPrice: (quote.ap + quote.bp) / 2, // midpoint
-    bidPrice: quote.bp,
-    askPrice: quote.ap,
-  };
+  if (!quote) {
+    throw new Error(`No quote data for ${symbol}`);
+  }
+
+  const bp = quote.bp || 0;
+  const ap = quote.ap || 0;
+  if (bp === 0 && ap === 0) {
+    throw new Error(`No bid/ask available for ${symbol} (market closed or no data)`);
+  }
+
+  // Only average when both sides are present. A one-sided quote (the other
+  // side missing/0, common outside RTH) must use the live side directly —
+  // averaging against 0 silently halves the price and corrupts strike selection.
+  const lastPrice = bp > 0 && ap > 0 ? (bp + ap) / 2 : bp || ap;
+
+  return { lastPrice, bidPrice: bp, askPrice: ap };
 }
 
 // ── Options Chain ────────────────────────────────────────
