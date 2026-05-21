@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.000038 — 2026-05-21
+- Screener: add liquid optionable ETFs (sector SPDRs, index, commodity, bond, international) to the wheel universe
+- Screener: lower default price band to $15-$150, now config-tunable via screen_min_price / screen_max_price
+- Approval: fund at least one contract (+5% buffer) so picked names aren't stranded below one contract's collateral
+
 ## v1.000037 — 2026-04-14
 - Close button now works on PENDING (unfilled) orders — cancels the Alpaca order instead of trying to liquidate
 - PENDING orders cancelled cleanly with no P&L impact (no premium was collected)

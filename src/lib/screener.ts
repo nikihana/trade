@@ -70,6 +70,8 @@ export async function runWeeklyScreen(): Promise<ScreenResult> {
     log(`Universe: ${universe.length} tickers${excluded.size > 0 ? ` (${excluded.size} excluded)` : ""}`);
 
     // ── Phase 1: Price filter (parallel batches of 20) ──
+    const minPrice = await getConfigNum("screen_min_price", 15);
+    const maxPrice = await getConfigNum("screen_max_price", 150);
     const priceFiltered: { symbol: string; price: number }[] = [];
     const batchSize = 20;
 
@@ -85,13 +87,13 @@ export async function runWeeklyScreen(): Promise<ScreenResult> {
       );
 
       for (const r of results) {
-        if (r.status === "fulfilled" && r.value.price >= 50 && r.value.price <= 300) {
+        if (r.status === "fulfilled" && r.value.price >= minPrice && r.value.price <= maxPrice) {
           priceFiltered.push(r.value);
         }
       }
     }
 
-    log(`Price filter: ${priceFiltered.length} of ${universe.length} passed ($50-$300)`);
+    log(`Price filter: ${priceFiltered.length} of ${universe.length} passed ($${minPrice}-$${maxPrice})`);
 
     // ── Phase 2: Deep screen (batches of 5) ──
     const deepResults: CandidateResult[] = [];

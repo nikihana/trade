@@ -6,12 +6,25 @@ import { requireAdmin } from "@/lib/admin-guard";
 // Allocation weights by yield rank (1-based index)
 const YIELD_WEIGHTS = [0.30, 0.25, 0.20, 0.15, 0.10];
 
-function computeAllocation(equity: number, yieldRank: number): number {
+function computeAllocation(
+  equity: number,
+  yieldRank: number,
+  suggestedStrike: number
+): number {
   const pool = equity * 0.70;
   const weight = YIELD_WEIGHTS[yieldRank - 1] ?? 0.10;
   const raw = pool * weight;
   const capped = Math.min(raw, equity * 0.20);
-  return Math.floor(capped / 1000) * 1000;
+  const rankAlloc = Math.floor(capped / 1000) * 1000;
+
+  // Guarantee the allocation can secure at least one contract, plus a 5%
+  // buffer for price drift between screen time and trade time. Without this,
+  // expensive names (e.g. NVDA at a $200 strike = $20k/contract) get funded
+  // below one contract's collateral and sit permanently BLOCKED.
+  const contractCost = suggestedStrike * 100;
+  const minToTrade = Math.ceil((contractCost * 1.05) / 1000) * 1000;
+
+  return Math.max(rankAlloc, minToTrade);
 }
 
 export async function POST(
@@ -37,7 +50,8 @@ export async function POST(
 
     const account = await getAccount();
     const yieldRank = Number(candidate.yieldRank) || 1;
-    const allocation = computeAllocation(account.equity, yieldRank);
+    const suggestedStrike = Number(candidate.suggestedStrike) || 0;
+    const allocation = computeAllocation(account.equity, yieldRank, suggestedStrike);
 
     const symbol = String(candidate.symbol);
 
