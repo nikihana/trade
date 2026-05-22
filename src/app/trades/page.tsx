@@ -36,8 +36,13 @@ function PositionsTab() {
   return (
     <div className="space-y-4">
       {data.trades.map((tick: { id: string; timestamp: string; message: string; data: string | null }) => {
-        const parsed = tick.data ? JSON.parse(tick.data) : null;
-        const positions = parsed?.positions || [];
+        type TickPosition = { symbol: string; price: number; stage: string; optionMid: number | null; premium: number; unrealizedPL: number; trueNetReturn?: number };
+        type TickData = { cash?: number; equity?: number; totalTrueNetReturn?: number; positions?: TickPosition[] };
+        let parsed: TickData | null = null;
+        try {
+          parsed = tick.data ? (JSON.parse(tick.data) as TickData) : null;
+        } catch { parsed = null; }
+        const positions: TickPosition[] = parsed?.positions || [];
 
         return (
           <div key={tick.id} className="bg-zinc-800 rounded-xl border border-zinc-700 overflow-hidden">
@@ -47,8 +52,8 @@ function PositionsTab() {
                 <span className="text-zinc-500">{fmtTime(tick.timestamp)}</span>
                 {parsed && (
                   <>
-                    <span className="text-white font-medium">Cash {fmt(parsed.cash)}</span>
-                    <span className="text-zinc-400">Equity {fmt(parsed.equity)}</span>
+                    <span className="text-white font-medium">Cash {fmt(parsed.cash ?? 0)}</span>
+                    <span className="text-zinc-400">Equity {fmt(parsed.equity ?? 0)}</span>
                     {parsed.totalTrueNetReturn !== undefined && (
                       <span className={parsed.totalTrueNetReturn >= 0 ? "text-green-400" : "text-red-400"}>
                         Net {fmt(parsed.totalTrueNetReturn)}
@@ -75,25 +80,25 @@ function PositionsTab() {
                     </tr>
                   </thead>
                   <tbody>
-                    {positions
-                      .sort((a: { symbol: string }, b: { symbol: string }) => a.symbol.localeCompare(b.symbol))
-                      .map((p: { symbol: string; price: number; stage: string; optionMid: number; premium: number; unrealizedPL: number; trueNetReturn?: number }) => (
+                    {[...positions]
+                      .sort((a, b) => a.symbol.localeCompare(b.symbol))
+                      .map((p) => (
                         <tr key={p.symbol} className="border-b border-zinc-700/30">
                           <td className="px-4 py-2 font-bold text-white">{p.symbol}</td>
-                          <td className="px-3 py-2 text-right text-zinc-300">{fmt(p.price)}</td>
+                          <td className="px-3 py-2 text-right text-zinc-300">{fmt(p.price ?? 0)}</td>
                           <td className="px-3 py-2">
                             <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
                               p.stage === "SELLING_PUTS" ? "bg-blue-900/60 text-blue-300"
                               : p.stage === "SELLING_CALLS" ? "bg-purple-900/60 text-purple-300"
                               : "bg-yellow-900/60 text-yellow-300"
                             }`}>
-                              {p.stage.replace(/_/g, " ")}
+                              {(p.stage || "").replace(/_/g, " ")}
                             </span>
                           </td>
-                          <td className="px-3 py-2 text-right font-mono text-zinc-400">${p.optionMid.toFixed(2)}</td>
-                          <td className="px-3 py-2 text-right text-green-400">{fmt(p.premium)}</td>
-                          <td className={`px-3 py-2 text-right font-medium ${p.unrealizedPL >= 0 ? "text-green-400" : "text-red-400"}`}>
-                            {fmt(p.unrealizedPL)}
+                          <td className="px-3 py-2 text-right font-mono text-zinc-400">{p.optionMid != null ? `$${p.optionMid.toFixed(2)}` : "—"}</td>
+                          <td className="px-3 py-2 text-right text-green-400">{fmt(p.premium ?? 0)}</td>
+                          <td className={`px-3 py-2 text-right font-medium ${(p.unrealizedPL ?? 0) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                            {fmt(p.unrealizedPL ?? 0)}
                           </td>
                           <td className={`px-4 py-2 text-right font-bold ${(p.trueNetReturn || 0) >= 0 ? "text-green-400" : "text-red-400"}`}>
                             {fmt(p.trueNetReturn || 0)}
