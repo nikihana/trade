@@ -16,6 +16,7 @@ const publicApiPaths = [
   "/api/admin/audit-pnl",
   "/api/admin/audit-account",
   "/api/admin/verify-pnl",
+  "/api/admin/probe-options",
 ];
 
 function hasSessionToken(request: NextRequest): boolean {

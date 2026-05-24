@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { sql } from "@/lib/db";
 import { getOrders } from "@/lib/alpaca";
 import { requireAdmin } from "@/lib/admin-guard";
+import { realizedPLContribution } from "@/lib/pnl";
 
 interface SuspectRow {
   id: string;
@@ -52,39 +53,6 @@ interface FormulaGapRow {
   closedReason: string;
   premium: number;
   closePrice: number | null;
-}
-
-/**
- * Per-contract contribution to WheelCycle.realizedPL, mirroring production
- * code paths exactly (see verification report). Returns 0 for any closedReason
- * that production does NOT propagate — including STOP_LOSS / PROFIT_TARGET,
- * which is a known production gap tracked separately in the report.
- */
-function realizedPLContribution(
-  status: string,
-  closedReason: string | null,
-  premium: number,
-  closePrice: number | null
-): number {
-  // CLOSED via the PENDING_CLOSE → CLOSED reconciler: realizedPL gets
-  // += (premium - closePrice). The reconciler doesn't filter on closedReason,
-  // so all of MANUAL, STOP_LOSS, PROFIT_TARGET flow through this path.
-  if (
-    status === "CLOSED" &&
-    (closedReason === "MANUAL" ||
-      closedReason === "STOP_LOSS" ||
-      closedReason === "PROFIT_TARGET")
-  ) {
-    return premium - (closePrice ?? 0);
-  }
-  // PENDING cancellation — order never filled, no money changed hands
-  if (status === "CLOSED" && closedReason === "CANCELLED") return 0;
-  // Worthless expiry — production sweep does not touch realizedPL
-  if (status === "EXPIRED" && closedReason === "EXPIRATION") return 0;
-  // Assignment — handled by cycle-level call-away logic (Site D), not per-contract
-  if (status === "ASSIGNED") return 0;
-  // Anything else: zero contribution. The caller should flag for review.
-  return 0;
 }
 
 /**
